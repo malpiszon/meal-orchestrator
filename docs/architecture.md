@@ -96,6 +96,7 @@ Responsibilities:
 
 - Hide provider-specific API clients and response formats.
 - Fetch raw menu data for a requested week.
+- Select the provider menu offering configured for the user.
 - Normalize provider responses into the canonical menu shape.
 - Return canonical menu data to the workflow.
 
@@ -108,6 +109,7 @@ Provider-specific HTTP/API integration plus transformation logic.
 Responsibilities:
 
 - Build provider API requests.
+- Map the user's configured offering to the provider-specific API representation, such as a URL argument.
 - Execute HTTP calls with timeout and retry policy.
 - Return raw provider payloads.
 - Preserve raw data enough for parser diagnostics.
@@ -185,13 +187,14 @@ Discord client:
 3. Orchestrator calculates the nearest upcoming Monday.
 4. Orchestrator resolves target date range as Monday through Friday.
 5. For each selected enabled user:
-   1. Fetch provider data for target week.
-   2. Detect whether the menu for the requested dates is available.
-   3. Normalize and filter menu for purchased meals and sizes.
-   4. Build LLM payload.
-   5. Call OpenRouter.
-   6. Send email through Resend.
-   7. Send Discord user notification.
+   1. Resolve the provider offering configured for the user.
+   2. Fetch provider data for target week and offering.
+   3. Detect whether the menu for the requested dates is available.
+   4. Normalize and filter menu for purchased meals and sizes.
+   5. Build LLM payload.
+   6. Call OpenRouter.
+   7. Send email through Resend.
+   8. Send Discord user notification.
 6. Any workflow error is logged and sent to the operational Discord webhook.
 7. The container exits after the run finishes.
 
@@ -246,11 +249,15 @@ Initial shape:
           "variants": [
             {
               "name": "Tortilla",
+              "composition": "Chicken, vegetables, tortilla, yogurt sauce",
               "nutrition": {
-                "calories": 520,
                 "protein_g": 28,
+                "fat_g": 18,
+                "saturated_fat_g": 6,
                 "carbs_g": 62,
-                "fat_g": 18
+                "sugar_g": 8,
+                "fiber_g": 9,
+                "salt_g": 2.1
               }
             }
           ]
@@ -263,8 +270,11 @@ Initial shape:
 
 Notes:
 
-- `nutrition` fields are provisional and should be finalized during provider parser implementation.
+- `nutrition` should use the most comprehensive currently known provider field set: protein, fat, saturated fat, carbohydrates, sugar, fiber, and salt.
+- `composition` should be whitespace-normalized and included because ingredients are useful for choosing the best meal according to the user's prompt.
 - `purchased_size` is used during filtering but omitted from the LLM payload because every included variant already corresponds to the purchased size.
+- Size and calories are omitted because they are not important for the selection strategy.
+- Provider rating is omitted because less healthy meals can have higher ratings, which may contradict goals defined in the user's prompt.
 - Provider-specific variant IDs, descriptions, and tags are omitted initially because they are not expected to help the LLM choose the best meal according to the user's prompt.
 - Missing optional fields should be omitted instead of included as `null`.
 - Raw provider responses should not be sent to the LLM.
@@ -279,6 +289,7 @@ class ProviderAdapter(Protocol):
         self,
         week_start: date,
         week_end: date,
+        provider_offering_id: int,
         user_meals: list[PurchasedMeal],
     ) -> CanonicalMenu: ...
 
@@ -297,15 +308,15 @@ class DiscordClient(Protocol):
 
 Recommended domain objects:
 
-- `RunConfig`
 - `UserConfig`
-- `ProviderConfig`
 - `PurchasedMeal`
 - `CanonicalMenu`
 - `PromptPayload`
 - `LlmRequest`
 - `LlmResult`
 - `DeliveryResult`
+
+`RunConfig` is not needed initially as a persistent configuration model. Runtime options can be represented as parsed CLI arguments or a small internal `RunOptions` value if that makes the orchestrator cleaner. `ProviderConfig` should be added only when provider-level settings outgrow environment variables and user-level provider selection.
 
 ## Configuration Model
 
@@ -350,6 +361,7 @@ users:
   - id: "alan"
     enabled: true
     provider: "example_provider"
+    provider_offering_id: 123
     email: "alan@example.com"
     discord_user_id: "123456789012345678"
     discord_webhook_env: "DISCORD_ALAN_WEBHOOK_URL"
@@ -370,6 +382,10 @@ Required environment variables:
 - Provider API credentials, if required by a provider.
 
 The user Discord webhook may initially be the same webhook for all users. Keeping it configurable per user is still useful because it allows future separation without changing the config model. Each user should also have `discord_user_id` or an equivalent mention identifier so user notifications can mention the recipient directly.
+
+Each user must define which provider offering should be selected, for example `Sport` or `Less gluten`. For the initial provider this is a simple integer passed as a URL argument, so `provider_offering_id` should stay as a plain field in `users.yaml`. If a future provider needs a different shape, that provider can introduce a more specific config field when needed.
+
+Future support should account for offering changes during the week. This may involve additional details, such as different purchased meal sizes after the offering change, so the exact config shape should be designed later when implementing that capability.
 
 ## Failure Handling
 
@@ -602,7 +618,3 @@ Plain text is directly useful for email. The LLM request/response boundary remai
 ### Short Polish user notifications first
 
 User Discord notifications should initially contain only a short delivery status in Polish, for example `Hej <@user_id>, Twoja dieta została zaplanowana.` Operational notifications can remain technical, in English, and do not need to use the same wording.
-
-## Open Questions
-
-- Which exact nutrition and meal fields should be retained in canonical JSON?
