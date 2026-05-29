@@ -25,10 +25,11 @@ The initial system should be a single containerized Python service with a CLI en
 
 - No web UI initially.
 - No distributed task queue.
-- No Redis, Kafka, Airflow, Temporal, Celery, or Kubernetes.
+- No Redis, Kafka, Airflow, Temporal, Celery.
 - No exactly-once delivery guarantee.
 - No shared LLM batches across users initially.
 - No database requirement for the first version.
+- The application must not require Kubernetes.
 
 ## High-Level Architecture
 
