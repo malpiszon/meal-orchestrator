@@ -4,7 +4,6 @@ from datetime import date
 
 from meal_orchestrator.domain import LlmResult, ProviderMenuRequest, WorkflowStatus
 from meal_orchestrator.orchestrator import RunOptions, RunOrchestrator
-from meal_orchestrator.services import AppServices
 from tests.unit.helpers import (
     FakeDiscordClient,
     FakeEmailClient,
@@ -47,12 +46,10 @@ def test_orchestrator_uses_provider_override(tmp_path) -> None:
         app_config=app_config(),
         users=[user_config(prompt_file.relative_to(tmp_path))],
         project_root=tmp_path,
-        services=AppServices(
-            provider_factory=lambda provider_id: provider,
-            llm_client=FakeLlmClient(),
-            email_client=FakeEmailClient(),
-            discord_client=discord,
-        ),
+        provider_factory=lambda provider_id: provider,
+        llm_client=FakeLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=discord,
     )
 
     result = orchestrator.run(
@@ -77,12 +74,10 @@ def test_orchestrator_sends_operational_notification_on_unhandled_failure(tmp_pa
         app_config=app_config(),
         users=[user_config(prompt_file.relative_to(tmp_path))],
         project_root=tmp_path,
-        services=AppServices(
-            provider_factory=lambda provider_id: FailingProvider(),
-            llm_client=FakeLlmClient(),
-            email_client=FakeEmailClient(),
-            discord_client=discord,
-        ),
+        provider_factory=lambda provider_id: FailingProvider(),
+        llm_client=FakeLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=discord,
     )
 
     result = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=True))

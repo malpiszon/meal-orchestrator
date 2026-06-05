@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from meal_orchestrator.config import AppConfig, UserConfig
+from meal_orchestrator.delivery import DiscordClient, EmailClient
 from meal_orchestrator.domain import (
     DiscordMessage,
     RunContext,
@@ -15,7 +18,8 @@ from meal_orchestrator.domain import (
     nearest_upcoming_monday,
     week_end_for,
 )
-from meal_orchestrator.services import AppServices, build_stub_services
+from meal_orchestrator.llm import OpenRouterClient
+from meal_orchestrator.providers import ProviderAdapter, build_provider_adapter
 from meal_orchestrator.workflow import UserWorkflowExecutor
 
 logger = logging.getLogger(__name__)
@@ -39,16 +43,26 @@ class RunOrchestrator:
         app_config: AppConfig,
         users: list[UserConfig],
         project_root: Path,
-        services: AppServices | None = None,
+        provider_factory: Callable[[str], ProviderAdapter] | None = None,
+        llm_client: OpenRouterClient | None = None,
+        email_client: EmailClient | None = None,
+        discord_client: DiscordClient | None = None,
     ) -> None:
         self.app_config = app_config
         self.users = users
         self.project_root = project_root
-        self.services = services or build_stub_services()
+        self.provider_factory_override = provider_factory
+        self.llm_client_override = llm_client
+        self.email_client_override = email_client
+        self.discord_client_override = discord_client
 
     def run(self, options: RunOptions) -> list[WorkflowResult]:
         run_id = uuid4().hex
-        week_start = options.week_start or nearest_upcoming_monday(date.today())
+        
+        # Target timezone-sensitive date resolution
+        tz = ZoneInfo(self.app_config.runtime.timezone)
+        today = datetime.now(tz).date()
+        week_start = options.week_start or nearest_upcoming_monday(today)
         week_end = week_end_for(week_start)
         selected_users = self._select_users(options.user_id)
 
@@ -57,21 +71,26 @@ class RunOrchestrator:
             extra={"run_id": run_id, "week_start": week_start.isoformat(), "step": "start"},
         )
 
+        discord_client = self.discord_client_override or DiscordClient(dry_run=options.dry_run)
+        email_client = self.email_client_override or EmailClient(dry_run=options.dry_run)
+        llm_client = self.llm_client_override or OpenRouterClient(dry_run=options.dry_run)
+        provider_factory = self.provider_factory_override or build_provider_adapter
+
         results: list[WorkflowResult] = []
         for user in selected_users:
             provider_id = (
                 options.provider_override or user.provider or self.app_config.default_provider
             )
-            provider = self.services.provider_factory(provider_id)
-            executor = UserWorkflowExecutor(
-                app_config=self.app_config,
-                provider=provider,
-                llm_client=self.services.llm_client,
-                email_client=self.services.email_client,
-                discord_client=self.services.discord_client,
-                project_root=self.project_root,
-            )
             try:
+                provider = provider_factory(provider_id)
+                executor = UserWorkflowExecutor(
+                    app_config=self.app_config,
+                    provider=provider,
+                    llm_client=llm_client,
+                    email_client=email_client,
+                    discord_client=discord_client,
+                    project_root=self.project_root,
+                )
                 results.append(
                     executor.execute(
                         user,
@@ -98,7 +117,7 @@ class RunOrchestrator:
                         "step": "failed",
                     },
                 )
-                self.services.discord_client.notify(
+                discord_client.notify(
                     DiscordMessage(
                         webhook_env=self.app_config.delivery.operational_discord_webhook_env,
                         content=(

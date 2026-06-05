@@ -1,4 +1,25 @@
-from meal_orchestrator.providers.base import MenuUnavailableError, ProviderAdapter
-from meal_orchestrator.providers.facade import build_provider_adapter
+from __future__ import annotations
 
-__all__ = ["MenuUnavailableError", "ProviderAdapter", "build_provider_adapter"]
+from typing import Protocol
+
+from meal_orchestrator.domain import CanonicalMenu, ProviderMenuRequest
+
+
+class MenuUnavailableError(RuntimeError):
+    pass
+
+
+class ProviderAdapter(Protocol):
+    provider_id: str
+
+    def get_canonical_week_menu(
+        self,
+        request: ProviderMenuRequest,
+    ) -> CanonicalMenu: ...
+
+
+def build_provider_adapter(provider_id: str) -> ProviderAdapter:
+    if provider_id == "example_provider":
+        from meal_orchestrator.providers.example_provider import ExampleProviderAdapter
+        return ExampleProviderAdapter()
+    raise ValueError(f"unsupported provider: {provider_id}")

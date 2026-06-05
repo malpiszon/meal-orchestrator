@@ -3,7 +3,7 @@ from datetime import date
 from pathlib import Path
 
 from meal_orchestrator.domain import PurchasedMeal
-from meal_orchestrator.providers.example_provider.normalizer import normalize_example_provider_menu
+from meal_orchestrator.providers.example_provider import normalize_example_provider_menu
 
 
 def test_normalizer_filters_to_purchased_meals_and_size() -> None:

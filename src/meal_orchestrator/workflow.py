@@ -109,31 +109,48 @@ class UserWorkflowExecutor:
                 logger.info("email delivery skipped", extra={**log_context, "step": "email"})
 
             if not run_context.skip_discord:
-                self.discord_client.notify(
-                    DiscordMessage(
-                        webhook_env=user.discord_webhook_env,
-                        content=f"Hej <@{user.discord_user_id}>, Twoja dieta została zaplanowana.",
+                try:
+                    self.discord_client.notify(
+                        DiscordMessage(
+                            webhook_env=user.discord_webhook_env,
+                            content=(
+                                f"Hej <@{user.discord_user_id}>, "
+                                "Twoja dieta została zaplanowana."
+                            ),
+                        )
                     )
-                )
-                logger.info(
-                    "discord notification processed",
-                    extra={**log_context, "step": "discord"},
-                )
+                    logger.info(
+                        "discord notification processed",
+                        extra={**log_context, "step": "discord"},
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "discord user notification failed (best effort)",
+                        exc_info=True,
+                        extra={**log_context, "step": "discord", "error": str(exc)},
+                    )
 
             logger.info("user workflow completed", extra={**log_context, "step": "complete"})
             return WorkflowResult(user_id=user.id, status=WorkflowStatus.COMPLETED)
         except MenuUnavailableError as exc:
             logger.info("menu unavailable", extra={**log_context, "step": "provider"})
             if not run_context.skip_discord:
-                self.discord_client.notify(
-                    DiscordMessage(
-                        webhook_env=user.discord_webhook_env,
-                        content=(
-                            f"Hej <@{user.discord_user_id}>, "
-                            "menu na wybrany tydzień nie jest jeszcze dostępne."
-                        ),
+                try:
+                    self.discord_client.notify(
+                        DiscordMessage(
+                            webhook_env=user.discord_webhook_env,
+                            content=(
+                                f"Hej <@{user.discord_user_id}>, "
+                                "menu na wybrany tydzień nie jest jeszcze dostępne."
+                            ),
+                        )
                     )
-                )
+                except Exception as exc_discord:
+                    logger.warning(
+                        "discord user notification failed for menu unavailable (best effort)",
+                        exc_info=True,
+                        extra={**log_context, "step": "discord", "error": str(exc_discord)},
+                    )
             return WorkflowResult(
                 user_id=user.id,
                 status=WorkflowStatus.MENU_UNAVAILABLE,

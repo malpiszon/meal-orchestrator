@@ -9,18 +9,18 @@ supports dry-run execution.
 ## Local usage
 
 ```bash
-/home/alan/.pyenv/versions/3.13.13/bin/python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 meal-orchestrator --config config/app.example.yaml --users config/users.example.yaml --dry-run
 ```
 
-Useful options:
+Useful options (must be combined with `--dry-run` in this skeleton):
 
 ```bash
 meal-orchestrator --user example --week-start 2026-06-01 --dry-run
-meal-orchestrator --skip-email --skip-discord
-meal-orchestrator --llm-model openai/gpt-4.1-mini
+meal-orchestrator --skip-email --skip-discord --dry-run
+meal-orchestrator --llm-model openai/gpt-4.1-mini --dry-run
 ```
 
 ## Docker
