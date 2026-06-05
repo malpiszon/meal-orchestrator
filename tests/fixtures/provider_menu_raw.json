@@ -1,0 +1,56 @@
+{
+  "offering_id": 123,
+  "week_start": "2026-06-01",
+  "week_end": "2026-06-05",
+  "days": [
+    {
+      "date": "2026-06-01",
+      "meals": [
+        {
+          "type": "breakfast",
+          "sizes": {
+            "M": [
+              {
+                "name": "Tortilla",
+                "composition": "Chicken,   vegetables,\n tortilla",
+                "nutrition": {
+                  "protein_g": 28,
+                  "fat_g": 18,
+                  "saturated_fat_g": 6,
+                  "carbs_g": 62,
+                  "sugar_g": 8,
+                  "fiber_g": 9,
+                  "salt_g": 2.1,
+                  "calories": 540
+                }
+              }
+            ],
+            "XL": [
+              {
+                "name": "Large tortilla",
+                "composition": "Chicken and tortilla",
+                "nutrition": {
+                  "protein_g": 40
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type": "dinner",
+          "sizes": {
+            "M": [
+              {
+                "name": "Ignored dinner",
+                "composition": "Not purchased",
+                "nutrition": {
+                  "protein_g": 10
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

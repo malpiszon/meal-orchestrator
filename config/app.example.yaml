@@ -1,0 +1,15 @@
+runtime:
+  timezone: "Europe/Warsaw"
+
+llm:
+  provider: "openrouter"
+  model: "openai/gpt-4.1-mini"
+  timeout_seconds: 120
+  max_retries: 3
+
+providers:
+  default: "example_provider"
+
+delivery:
+  email_from: "Meal Orchestrator <meals@example.com>"
+  operational_discord_webhook_env: "DISCORD_OPS_WEBHOOK_URL"

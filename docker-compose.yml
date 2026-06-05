@@ -1,0 +1,9 @@
+services:
+  meal-orchestrator:
+    build: .
+    command: ["--config", "config/app.example.yaml", "--users", "config/users.example.yaml", "--dry-run"]
+    environment:
+      OPENROUTER_API_KEY: "local-placeholder"
+      RESEND_API_KEY: "local-placeholder"
+      DISCORD_OPS_WEBHOOK_URL: "local-placeholder"
+      DISCORD_EXAMPLE_WEBHOOK_URL: "local-placeholder"
