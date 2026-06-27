@@ -74,13 +74,14 @@ def _fetch_day_raw(date_str: str, offer_id: int | str) -> dict[str, Any]:
 
     root = data.get("data", data)
     results = root.get("results", [])
+    includes = root.get("includes", {})
 
     if not results:
         raise MenuUnavailableError(
             f"ntfy: empty results for date={date_str} offer_id={offer_id}"
         )
 
-    return {"date": date_str, "offer_id": offer_id, "results": results}
+    return {"date": date_str, "offer_id": offer_id, "results": results, "includes": includes}
 
 
 def _fetch_day_with_retries(date_str: str, offer_id: int | str) -> dict[str, Any]:

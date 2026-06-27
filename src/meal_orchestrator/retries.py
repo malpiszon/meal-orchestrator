@@ -43,7 +43,9 @@ def with_retries(
         RetryError: When all attempts are exhausted.
         Exception: Any non-retryable exception from fn is re-raised immediately.
     """
-    last_exc: Exception | None = None
+    if max_attempts < 1:
+        raise ValueError(f"max_attempts must be >= 1, got {max_attempts}")
+
     delay = base_delay_seconds
 
     for attempt in range(1, max_attempts + 1):
@@ -52,7 +54,6 @@ def with_retries(
         except Exception as exc:
             if not retryable(exc):
                 raise
-            last_exc = exc
             if attempt < max_attempts:
                 logger.warning(
                     "%s failed (attempt %d/%d): %s — retrying in %.1fs",
@@ -72,8 +73,9 @@ def with_retries(
                     max_attempts,
                     exc,
                 )
+                raise RetryError(
+                    f"{operation_name} failed after {max_attempts} attempt(s)",
+                    last_exception=exc,
+                ) from exc
 
-    raise RetryError(
-        f"{operation_name} failed after {max_attempts} attempt(s)",
-        last_exception=last_exc,  # type: ignore[arg-type]
-    )
+    raise AssertionError("unreachable")
