@@ -11,7 +11,6 @@ from meal_orchestrator.domain import (
     CanonicalMenu,
     MealVariant,
     Nutrition,
-    ProviderMenuRequest,
     PurchasedMeal,
 )
 
@@ -186,7 +185,8 @@ def _float_or_none(product: dict[str, Any], key: str) -> float | None:
         return None
     if not isinstance(value, (int, float)):
         raise ValueError(
-            f"ntfy: expected numeric value for nutrition field, got {type(value).__name__}: {value!r}"
+            f"ntfy: expected numeric nutrition value, got "
+            f"{type(value).__name__}: {value!r}"
         )
     return float(value)
 

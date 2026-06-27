@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Callable, TypeVar
+from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
-
-T = TypeVar("T")
 
 
 class RetryError(RuntimeError):
@@ -17,7 +15,7 @@ class RetryError(RuntimeError):
         self.last_exception = last_exception
 
 
-def with_retries(
+def with_retries[T](
     fn: Callable[[], T],
     *,
     max_attempts: int = 3,
@@ -25,7 +23,7 @@ def with_retries(
     backoff_factor: float = 2.0,
     retryable: Callable[[Exception], bool],
     operation_name: str = "operation",
-) -> T:
+) -> T:  # noqa: UP047 — `from __future__ import annotations` prevents PEP 695 syntax
     """Execute fn with exponential backoff retries.
 
     Args:

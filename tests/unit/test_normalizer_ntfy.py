@@ -15,7 +15,9 @@ _WEEK_START = date(2026, 6, 29)
 _WEEK_END = date(2026, 7, 3)
 
 # Minimal inline raw_day payloads used for targeted unit tests.
-_MEAL_TYPE_BREAKFAST = {"id": 1, "diet_id": 1, "meal_name": {"key": "BREAKFAST", "value": "Śniadanie"}}
+_MEAL_TYPE_BREAKFAST = {
+    "id": 1, "diet_id": 1, "meal_name": {"key": "BREAKFAST", "value": "Śniadanie"}
+}
 _MEAL_TYPE_LUNCH = {"id": 2, "diet_id": 1, "meal_name": {"key": "LUNCH", "value": "Obiad"}}
 
 _PRODUCT_BREAKFAST_M = {
