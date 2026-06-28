@@ -58,8 +58,7 @@ class RunOrchestrator:
 
     def run(self, options: RunOptions) -> list[WorkflowResult]:
         run_id = uuid4().hex
-        
-        # Target timezone-sensitive date resolution
+
         tz = ZoneInfo(self.app_config.runtime.timezone)
         today = datetime.now(tz).date()
         week_start = options.week_start or nearest_upcoming_monday(today)
@@ -91,24 +90,22 @@ class RunOrchestrator:
                     discord_client=discord_client,
                     project_root=self.project_root,
                 )
-                results.append(
-                    executor.execute(
-                        user,
-                        RunContext(
-                            run_id=run_id,
-                            week_start=week_start,
-                            week_end=week_end,
-                            dry_run=options.dry_run,
-                            skip_email=options.skip_email,
-                            skip_discord=options.skip_discord,
-                            provider_id=provider_id,
-                            llm_model=options.llm_model,
-                        ),
-                    )
+                result = executor.execute(
+                    user,
+                    RunContext(
+                        run_id=run_id,
+                        week_start=week_start,
+                        week_end=week_end,
+                        dry_run=options.dry_run,
+                        skip_email=options.skip_email,
+                        skip_discord=options.skip_discord,
+                        provider_id=provider_id,
+                        llm_model=options.llm_model,
+                    ),
                 )
             except Exception as exc:
                 logger.exception(
-                    "user workflow failed",
+                    "user workflow setup failed",
                     extra={
                         "run_id": run_id,
                         "user_id": user.id,
@@ -117,18 +114,20 @@ class RunOrchestrator:
                         "step": "failed",
                     },
                 )
-                discord_client.notify(
-                    DiscordMessage(
-                        webhook_env=self.app_config.delivery.operational_discord_webhook_env,
-                        content=(
-                            f"Meal orchestrator workflow failed for user {user.id} "
-                            f"during run {run_id}: {exc}"
-                        ),
-                    )
+                result = WorkflowResult(
+                    user_id=user.id, status=WorkflowStatus.FAILED, detail=str(exc)
                 )
-                results.append(
-                    WorkflowResult(user_id=user.id, status=WorkflowStatus.FAILED, detail=str(exc))
+
+            if result.status == WorkflowStatus.FAILED:
+                _send_operational_notification(
+                    discord_client=discord_client,
+                    webhook_env=self.app_config.delivery.operational_discord_webhook_env,
+                    user_id=user.id,
+                    run_id=run_id,
+                    detail=result.detail or "unknown error",
                 )
+
+            results.append(result)
 
         logger.info(
             "run completed",
@@ -144,3 +143,29 @@ class RunOrchestrator:
         if not selected:
             raise ValueError(f"enabled user not found: {user_id}")
         return selected
+
+
+def _send_operational_notification(
+    *,
+    discord_client: DiscordClient,
+    webhook_env: str,
+    user_id: str,
+    run_id: str,
+    detail: str,
+) -> None:
+    try:
+        discord_client.notify(
+            DiscordMessage(
+                webhook_env=webhook_env,
+                content=(
+                    f"Meal orchestrator workflow failed for user {user_id} "
+                    f"during run {run_id}: {detail}"
+                ),
+            )
+        )
+    except Exception:
+        logger.warning(
+            "operational discord notification failed",
+            exc_info=True,
+            extra={"run_id": run_id, "user_id": user_id, "step": "ops_notify"},
+        )

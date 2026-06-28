@@ -1,0 +1,196 @@
+{
+  "provider": "ntfy",
+  "week_start": "2026-06-29",
+  "week_end": "2026-07-03",
+  "user": {
+    "id": "alan"
+  },
+  "days": [
+    {
+      "date": "2026-06-29",
+      "meals": [
+        {
+          "type": "breakfast",
+          "variants": [
+            {
+              "name": "Frittata z porem, wędzonym boczkiem i serem cheddar, świeże warzywa",
+              "composition": "frittata 70% (JAJA kurze, boczek wędzony (zawiera SOJĘ), ser cheddar (MLEKO, sól, kultury bakterii, podpuszczka mikrobiologiczna, barwnik: annato, beta-karoten), por), papryka żółta 15%, pomidorki 15%",
+              "nutrition": {
+                "protein_g": 23.8,
+                "fat_g": 27.4,
+                "saturated_fat_g": 12.9,
+                "carbs_g": 6.7,
+                "sugar_g": 1.3,
+                "fiber_g": 1.1,
+                "salt_g": 2.0
+              }
+            },
+            {
+              "name": "Proteinowa owsianka banoffee z gorzką czekoladą, bita śmietana bez cukru, cząstki jabłka",
+              "composition": "owsianka 72% (MLEKO spożywcze 2% tł., woda, płatki OWSIANE bezglutenowe, odżywka białkowa karmelowa (Koncentrat białka serwatki (z MLEKA), stabilizator: guma arabska, regulator kwasowości: kwas jabłkowy, aromat, substancja słodząca: sukraloza), banan), jabłko 25% (jabłko, sok z cytryny), czekolada gorzka bez cukru 2% (substancja słodząca maltitol, tłuszcz kakaowy, miazga kakaowa, emulgator: lecytyna SOJOWA, naturalny aromat waniliowy), daktyle 2% (daktyle suszone (zawiera DWUTLENEK SIARKI), woda), bita śmietana (śmietanka 30% tł. (MLEKO, stabilizator: karagen, mleczan wapnia), ser mascarpone (MLEKO pasteryzowane, regulator kwasowości: kwas cytrynowy), erytrytol)",
+              "nutrition": {
+                "protein_g": 19.9,
+                "fat_g": 8.8,
+                "saturated_fat_g": 4.0,
+                "carbs_g": 51.4,
+                "sugar_g": 21.0,
+                "fiber_g": 6.7,
+                "salt_g": 0.2
+              }
+            },
+            {
+              "name": "Grahamka z pastą z roślinnym tuńczykiem i jajkiem, ogórki kiszone",
+              "composition": "kanapka 65% (grahamka (mąka PSZENNA graham 1850, mąka PSZENNA 500, woda, drożdże, cukier, sól), roślinny odpowiednik tuńczyka (woda, olej rzepakowy, białko grochu 27%, błonnik grochowy, aromaty naturalne, sól, witamina B12), JAJA kurze, majonez (olej rzepakowy, musztarda (woda, ocet, GORCZYCA, sól, przyprawy), woda, żółtka JAJ kurzych), koperek, sól, pieprz czarny), ogórek kiszony 29% (ogórki, woda, przyprawy (GORCZYCA), sól), szpinak 6%",
+              "nutrition": {
+                "protein_g": 16.2,
+                "fat_g": 25.3,
+                "saturated_fat_g": 2.7,
+                "carbs_g": 27.7,
+                "sugar_g": 1.8,
+                "fiber_g": 4.0,
+                "salt_g": 2.4
+              }
+            }
+          ]
+        },
+        {
+          "type": "lunch",
+          "variants": [
+            {
+              "name": "Pulpeciki drobiowe w sosie pomidorowo-koperkowym, ryż basmati, warzywa z pary",
+              "composition": "pulpecik 40% (kurczak (pierś), kurczak udko, JAJA kurze, olej rzepakowy, mąka OWSIANA bezglutenowa, czosnek, przyprawa gyros (sól, curry, chili, kolendra, papryka słodka, czosnek, pieprz ziołowy, cebula), sól, pieprz czarny), warzywa 24% (brokuły, kalafior, marchew baby), ryż 20% (ryż basmati, sól), sos 16% (pulpa pomidorowa (pomidory, regulator kwasowości: kwas cytrynowy), woda, śmietanka 18% tł. ((MLEKO, stabilizator: karagen)), olej rzepakowy, koperek, sól, pieprz czarny)",
+              "nutrition": {
+                "protein_g": 60.5,
+                "fat_g": 29.2,
+                "saturated_fat_g": 3.5,
+                "carbs_g": 57.8,
+                "sugar_g": 9.2,
+                "fiber_g": 7.6,
+                "salt_g": 2.6
+              }
+            },
+            {
+              "name": "Wieprzowina w sosie słodko-kwaśnym z ananasem, ryż jaśminowy, surówka z białej kapusty",
+              "composition": "sos 28% (pulpa pomidorowa (pomidory, regulator kwasowości: kwas cytrynowy), ananas, papryka czerwona, marchew, cebula czerwona, ksylitol, sok z cytryny, olej rzepakowy, czosnek, sól, mąka ziemniaczana, sambal oelek), karkówka 28% (karkówka wieprzowa, wywar warzywny, czosnek, olej rzepakowy, papryka słodka, sól, papryka ostra, pieprz czarny), ryż 23% (ryż jaśminowy, sól), surówka 21% (kapusta biała, jabłko, marchew, olej rzepakowy, ocet jabłkowy (zawiera DWUTLENEK SIARKI), pieprz czarny, sól)",
+              "nutrition": {
+                "protein_g": 46.6,
+                "fat_g": 38.0,
+                "saturated_fat_g": 13.3,
+                "carbs_g": 61.6,
+                "sugar_g": 12.4,
+                "fiber_g": 4.3,
+                "salt_g": 4.3
+              }
+            },
+            {
+              "name": "Roślinne kotlety mielone, puree ziemniaczane z masłem i koperkiem, buraczki",
+              "composition": "roślinne mielone 53% (wegańskie mięso mielone (woda, białko grochu, olej rzepakowy, błonnik (grochowy, bambusowy), naturalne aromaty, barwnik: karmel, witamina B12), JAJA kurze, cebula biała, płatki drożdżowe (suszone drożdże nieaktywne), bułka tarta (mąka PSZENNA, woda, drożdże, sól), olej rzepakowy, czosnek, sól, natka pietruszki, papryka wędzona, pieprz czarny, olej rzepakowy), puree 25% (ziemniaki, MLEKO spożywcze 2% tł., masło 82% tł. (zawiera MLEKO), sól, pieprz czarny), buraczki 23% (burak, jabłko, cebula biała, ksylitol, sok z cytryny, sól, olej rzepakowy, pieprz czarny), koperek",
+              "nutrition": {
+                "protein_g": 50.8,
+                "fat_g": 29.9,
+                "saturated_fat_g": 5.4,
+                "carbs_g": 65.2,
+                "sugar_g": 11.3,
+                "fiber_g": 20.5,
+                "salt_g": 6.5
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "date": "2026-06-30",
+      "meals": [
+        {
+          "type": "breakfast",
+          "variants": [
+            {
+              "name": "Jajka z chorizo w sosie pomidorowym, szpinak z papryką i serem greckim",
+              "composition": "jajka 35% (JAJA kurze, chorizo), sos 27% (pulpa pomidorowa (pomidory, regulator kwasowości: kwas cytrynowy), cebula biała, koncentrat pomidorowy 30%, czosnek, olej rzepakowy, sól, pieprz czarny), papryka żółta 20%, ser typu feta 8% (MLEKO pasteryzowane, sól, regulator kwasowości: glukonolakton), sos winegret 6% (olej rzepakowy, sok z cytryny, miód pszczeli, musztarda francuska (woda, GORCZYCA, ocet jabłkowy, cukier, sól, ocet spirytusowy, przyprawy, regulator kwasowości: kwas cytrynowy), sól, pieprz czarny), szpinak 4%",
+              "nutrition": {
+                "protein_g": 20.5,
+                "fat_g": 27.1,
+                "saturated_fat_g": 7.1,
+                "carbs_g": 11.5,
+                "sugar_g": 6.0,
+                "fiber_g": 1.9,
+                "salt_g": 2.0
+              }
+            },
+            {
+              "name": "Razowe placuszki z ricottą, białkowy krem pistacjowy, winogrona",
+              "composition": "placki 61% (mąka PSZENNA pełnoziarnista, MAŚLANKA, MLEKO spożywcze 2% tł., JAJA kurze, ksylitol, ser ricotta (serwatka z MLEKA krowiego, ŚMIETANKA, sól, regulator kwasowości: kwas cytrynowy), mąka ORKISZOWA, proszek do pieczenia, soda oczyszczona, sól), winogrona ciemne 27%, krem 11% (pasta pistacjowa (PISTACJE), napój migdałowy (Woda, MIGDAŁ, ekstrakt z MIGDAŁÓW, stabilizator: (ekologiczna mączka chleba świętojańskiego), sól morska), odżywka białkowa biała czekolada (Koncentrat białka serwatki (z MLEKA), stabilizator: guma arabska, regulator kwasowości: kwas jabłkowy, aromat, substancja słodząca: sukraloza), ser śmietankowy (MLEKO pasteryzowane, ŚMIETANKA), ksylitol, woda mineralna niegazowana), MIGDAŁY w płatkach 1%",
+              "nutrition": {
+                "protein_g": 16.7,
+                "fat_g": 9.6,
+                "saturated_fat_g": 2.8,
+                "carbs_g": 56.2,
+                "sugar_g": 12.3,
+                "fiber_g": 4.8,
+                "salt_g": 0.7
+              }
+            },
+            {
+              "name": "Komosanka z płatkami migdałów, białkowy krem czekoladowy, truskawki",
+              "composition": "komosanka 64% (MLEKO spożywcze 2% tł., komosa ryżowa, woda, odżywka białkowa o smaku waniliowym (Koncentrat białka serwatki (z MLEKA), stabilizator: guma arabska, regulator kwasowości: kwas jabłkowy, aromat, substancja słodząca: sukraloza), pasta z migdałów (MIGDAŁY pieczone), ksylitol), krem 18% (ser śmietankowy (MLEKO pasteryzowane, ŚMIETANKA), jogurt grecki (ŚMIETANKA, MLEKO w proszku, białka MLEKA, żywe kultury bakterii jogurtowych), odżywka białkowa czekoladowa (Koncentrat białka serwatki (z MLEKA), stabilizator: guma arabska, regulator kwasowości: kwas jabłkowy, aromat, substancja słodząca: sukraloza), kakao), truskawki 18%, MIGDAŁY w płatkach 1%",
+              "nutrition": {
+                "protein_g": 20.3,
+                "fat_g": 19.0,
+                "saturated_fat_g": 7.4,
+                "carbs_g": 34.8,
+                "sugar_g": 9.6,
+                "fiber_g": 6.5,
+                "salt_g": 0.4
+              }
+            }
+          ]
+        },
+        {
+          "type": "lunch",
+          "variants": [
+            {
+              "name": "Indyk po malezyjsku w sosie orzechowym z papryką i groszkiem cukrowym, ryż basmati",
+              "composition": "indyk 42% (indyk, czosnek, papryka słodka, pieprz czarny, sól, tymianek, olej rzepakowy, woda), sos 32% (napój kokosowy (Ekstrakt kokosowy, woda), woda, groszek cukrowy, papryka czerwona, ORZESZKI ZIEMNE, cebula biała, pasta z orzeszków ziemnych (ORZESZKI ZIEMNE prażone), sok z cytryny, olej sezamowy (olej SOJOWY, olej SEZAMOWY), sos tamari (woda, SOJA, sól, ocet spirytusowy), ksylitol, czosnek, trawa cytrynowa, sambal oelek, imbir, kmin rzymski, kurkuma, olej rzepakowy), ryż 26% (ryż basmati, sól)",
+              "nutrition": {
+                "protein_g": 66.3,
+                "fat_g": 26.5,
+                "saturated_fat_g": 11.1,
+                "carbs_g": 61.2,
+                "sugar_g": 4.6,
+                "fiber_g": 3.2,
+                "salt_g": 0.7
+              }
+            },
+            {
+              "name": "Kurczak w sosie pomidorowym z serem gorgonzola i pełnoziarnistym orecchiette, świeże sałaty z oliwkami",
+              "composition": "sos 32% (pulpa pomidorowa (pomidory, regulator kwasowości: kwas cytrynowy), pomidory (Pomidory kostka, sok pomidorowy, kwas cytrynowy), ser gorgonzola (pasteryzowane MLEKO krowie, sól, podpuszczka zwierzęca (cielęca)), woda, cebula biała, czosnek, ksylitol, sól, olej rzepakowy), kurczak 26% (kurczak (pierś), czosnek, olej rzepakowy, papryka słodka, pieprz czarny, sól, tymianek, woda), makaron 25% (makaron orecchiette razowy (semolina z PSZENICY durum), sól, olej rzepakowy), oliwki czarne 10% (Woda, oliwki czarne, sól, stabilizator: glukonian żelazawy), sałata rzymska 5%, rukola 2%",
+              "nutrition": {
+                "protein_g": 60.5,
+                "fat_g": 21.3,
+                "saturated_fat_g": 7.8,
+                "carbs_g": 63.7,
+                "sugar_g": 6.7,
+                "fiber_g": 10.7,
+                "salt_g": 3.4
+              }
+            },
+            {
+              "name": "Paneer w sosie pomidorowo-paprykowym z białą fasolą, kuskus perłowy z ziołami",
+              "composition": "sos 29% (pulpa pomidorowa (pomidory, regulator kwasowości: kwas cytrynowy), papryka czerwona, cebula biała, koncentrat pomidorowy 30%, olej rzepakowy, sól, pieprz czarny), kuskus 25% (kuskus perłowy (zawiera GLUTEN), mięta, natka pietruszki, sól, olej rzepakowy), fasola biała 18%, ser 18% (ser paneer (Mleko KROWIE pasteryzowane, kwasek cytrynowy), czosnek, miód pszczeli, sos sojowy jasny (woda, SOJA, sól, mąka PSZENNA, cukier), sól, papryka słodka, pieprz czarny), pomidorki 11% (pomidorki, olej rzepakowy, tymianek, sól, pieprz czarny)",
+              "nutrition": {
+                "protein_g": 35.1,
+                "fat_g": 30.7,
+                "saturated_fat_g": 16.7,
+                "carbs_g": 74.1,
+                "sugar_g": 22.2,
+                "fiber_g": 11.3,
+                "salt_g": 3.0
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
