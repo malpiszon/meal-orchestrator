@@ -8,3 +8,10 @@ Implement only what is required for the current task.
 
 Avoid speculative abstractions and future-proofing unless explicitly requested.
 
+Before pushing, run the CI checks locally and fix any failures:
+
+```
+ruff check .
+pytest
+```
+
