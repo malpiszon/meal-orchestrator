@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import io
 import json
 import urllib.error
 import urllib.request

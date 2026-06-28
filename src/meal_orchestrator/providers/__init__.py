@@ -22,4 +22,7 @@ def build_provider_adapter(provider_id: str) -> ProviderAdapter:
     if provider_id == "example_provider":
         from meal_orchestrator.providers.example_provider import ExampleProviderAdapter
         return ExampleProviderAdapter()
+    if provider_id == "ntfy":
+        from meal_orchestrator.providers.ntfy import NtfyProviderAdapter
+        return NtfyProviderAdapter()
     raise ValueError(f"unsupported provider: {provider_id}")

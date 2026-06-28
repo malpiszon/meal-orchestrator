@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Callable, TypeVar
+from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
-
-T = TypeVar("T")
 
 
 class RetryError(RuntimeError):
@@ -17,7 +15,7 @@ class RetryError(RuntimeError):
         self.last_exception = last_exception
 
 
-def with_retries(
+def with_retries[T](
     fn: Callable[[], T],
     *,
     max_attempts: int = 3,
@@ -25,7 +23,7 @@ def with_retries(
     backoff_factor: float = 2.0,
     retryable: Callable[[Exception], bool],
     operation_name: str = "operation",
-) -> T:
+) -> T:  # noqa: UP047 — `from __future__ import annotations` prevents PEP 695 syntax
     """Execute fn with exponential backoff retries.
 
     Args:
@@ -43,7 +41,9 @@ def with_retries(
         RetryError: When all attempts are exhausted.
         Exception: Any non-retryable exception from fn is re-raised immediately.
     """
-    last_exc: Exception | None = None
+    if max_attempts < 1:
+        raise ValueError(f"max_attempts must be >= 1, got {max_attempts}")
+
     delay = base_delay_seconds
 
     for attempt in range(1, max_attempts + 1):
@@ -52,7 +52,6 @@ def with_retries(
         except Exception as exc:
             if not retryable(exc):
                 raise
-            last_exc = exc
             if attempt < max_attempts:
                 logger.warning(
                     "%s failed (attempt %d/%d): %s — retrying in %.1fs",
@@ -72,8 +71,9 @@ def with_retries(
                     max_attempts,
                     exc,
                 )
+                raise RetryError(
+                    f"{operation_name} failed after {max_attempts} attempt(s)",
+                    last_exception=exc,
+                ) from exc
 
-    raise RetryError(
-        f"{operation_name} failed after {max_attempts} attempt(s)",
-        last_exception=last_exc,  # type: ignore[arg-type]
-    )
+    raise AssertionError("unreachable")

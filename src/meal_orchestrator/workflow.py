@@ -156,6 +156,17 @@ class UserWorkflowExecutor:
                 status=WorkflowStatus.MENU_UNAVAILABLE,
                 detail=str(exc),
             )
+        except Exception as exc:
+            logger.error(
+                "user workflow failed",
+                exc_info=True,
+                extra={**log_context, "step": "failed", "error": str(exc)},
+            )
+            return WorkflowResult(
+                user_id=user.id,
+                status=WorkflowStatus.FAILED,
+                detail=str(exc),
+            )
 
 
 def _json_size(menu) -> int:
