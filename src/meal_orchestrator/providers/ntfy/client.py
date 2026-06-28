@@ -103,8 +103,6 @@ class NtfyClient:
     normalizer to transform into the canonical schema.
     """
 
-    provider_id = "ntfy"
-
     def fetch_week_raw(
         self,
         week_start: date,

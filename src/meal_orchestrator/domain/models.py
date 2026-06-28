@@ -110,7 +110,6 @@ class CanonicalMenu:
 class PromptPayload:
     user_prompt: str
     menu: CanonicalMenu
-    metadata: dict[str, str]
 
 
 @dataclass(frozen=True)

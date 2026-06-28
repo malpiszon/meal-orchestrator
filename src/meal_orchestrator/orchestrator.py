@@ -70,9 +70,9 @@ class RunOrchestrator:
             extra={"run_id": run_id, "week_start": week_start.isoformat(), "step": "start"},
         )
 
-        discord_client = self.discord_client_override or DiscordClient(dry_run=options.dry_run)
-        email_client = self.email_client_override or EmailClient(dry_run=options.dry_run)
-        llm_client = self.llm_client_override or OpenRouterClient(dry_run=options.dry_run)
+        discord_client = self.discord_client_override or DiscordClient()
+        email_client = self.email_client_override or EmailClient()
+        llm_client = self.llm_client_override or OpenRouterClient()
         provider_factory = self.provider_factory_override or build_provider_adapter
 
         results: list[WorkflowResult] = []

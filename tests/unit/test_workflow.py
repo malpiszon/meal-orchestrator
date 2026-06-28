@@ -51,7 +51,7 @@ def test_dry_run_builds_prompt_without_llm_or_email(tmp_path) -> None:
     assert provider.requests
     assert llm.requests == []
     assert email.messages == []
-    assert len(discord.messages) == 1
+    assert discord.messages == []
 
 
 def test_non_dry_run_calls_llm_and_email(tmp_path) -> None:
