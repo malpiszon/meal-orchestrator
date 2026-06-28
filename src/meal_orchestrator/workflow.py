@@ -63,6 +63,10 @@ class UserWorkflowExecutor:
             )
             _ensure_complete_requested_menu(menu, user)
             logger.info(
+                "canonical menu",
+                extra={**log_context, "step": "canonical_menu", "menu": menu.to_compact_dict()},
+            )
+            logger.info(
                 "provider menu normalized",
                 extra={
                     **log_context,

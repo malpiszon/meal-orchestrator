@@ -6,3 +6,5 @@ __pycache__/
 *.egg-info/
 data/
 .env
+config/*.local.yaml
+prompts/*.local.md

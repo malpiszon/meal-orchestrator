@@ -27,10 +27,6 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if not args.dry_run:
-        parser.error(
-            "this skeleton only supports --dry-run until real integrations are implemented"
-        )
     configure_logging(args.log_level)
     app_config = load_app_config(args.config)
     users = load_users_config(args.users)
