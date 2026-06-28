@@ -25,7 +25,7 @@ def test_prompt_builder_combines_user_prompt_and_compact_menu(tmp_path) -> None:
         ],
     )
 
-    payload = build_prompt_payload(prompt_file, menu, "example_provider")
+    payload = build_prompt_payload(prompt_file, menu)
     rendered = render_llm_request_text(payload)
 
     assert "Prefer high protein." in rendered

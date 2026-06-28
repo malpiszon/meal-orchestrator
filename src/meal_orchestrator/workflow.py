@@ -63,10 +63,6 @@ class UserWorkflowExecutor:
             )
             _ensure_complete_requested_menu(menu, user)
             logger.info(
-                "canonical menu",
-                extra={**log_context, "step": "canonical_menu", "menu": menu.to_compact_dict()},
-            )
-            logger.info(
                 "provider menu normalized",
                 extra={
                     **log_context,
@@ -78,7 +74,6 @@ class UserWorkflowExecutor:
             prompt_payload = build_prompt_payload(
                 prompt_file=self.project_root / user.prompt_file,
                 menu=menu,
-                provider=run_context.provider_id,
             )
             logger.info("prompt payload built", extra={**log_context, "step": "prompt"})
 
@@ -112,7 +107,7 @@ class UserWorkflowExecutor:
             else:
                 logger.info("email delivery skipped", extra={**log_context, "step": "email"})
 
-            if not run_context.skip_discord:
+            if not run_context.skip_discord and not run_context.dry_run:
                 try:
                     self.discord_client.notify(
                         DiscordMessage(
@@ -133,12 +128,16 @@ class UserWorkflowExecutor:
                         exc_info=True,
                         extra={**log_context, "step": "discord", "error": str(exc)},
                     )
+            else:
+                logger.info(
+                    "discord notification skipped", extra={**log_context, "step": "discord"}
+                )
 
             logger.info("user workflow completed", extra={**log_context, "step": "complete"})
             return WorkflowResult(user_id=user.id, status=WorkflowStatus.COMPLETED)
         except MenuUnavailableError as exc:
             logger.info("menu unavailable", extra={**log_context, "step": "provider"})
-            if not run_context.skip_discord:
+            if not run_context.skip_discord and not run_context.dry_run:
                 try:
                     self.discord_client.notify(
                         DiscordMessage(
