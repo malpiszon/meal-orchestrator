@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from meal_orchestrator.domain import LlmResult, ProviderMenuRequest, WorkflowStatus
+from meal_orchestrator.domain import LlmResult, ProviderMenuRequest, ProviderResult, WorkflowStatus
 from meal_orchestrator.orchestrator import RunOptions, RunOrchestrator
 from tests.unit.helpers import (
     FakeDiscordClient,
@@ -21,7 +21,7 @@ class RecordingProvider:
 
     def get_canonical_week_menu(self, request: ProviderMenuRequest):
         self.requests.append(request)
-        return canonical_menu()
+        return ProviderResult(menu=canonical_menu())
 
 
 class FailingProvider:

@@ -7,6 +7,7 @@ import yaml
 
 from meal_orchestrator.config.models import (
     AppConfig,
+    ArtifactConfig,
     DeliveryConfig,
     LlmConfig,
     RuntimeConfig,
@@ -36,6 +37,34 @@ def load_app_config(path: Path) -> AppConfig:
                 data, "delivery", "operational_discord_webhook_env"
             ),
         ),
+        artifacts=_parse_artifacts(data),
+    )
+
+
+def _parse_artifacts(data: dict[str, Any]) -> ArtifactConfig | None:
+    raw = data.get("artifacts")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ConfigError("artifacts must be a mapping")
+    enabled = raw.get("enabled")
+    if not isinstance(enabled, bool):
+        raise ConfigError("artifacts.enabled must be a boolean")
+    if not enabled:
+        return None
+    path_raw = raw.get("path")
+    if path_raw is None:
+        raise ConfigError("artifacts.path is required when artifacts are enabled")
+    retention_days = raw.get("retention_days")
+    if not isinstance(retention_days, int) or retention_days < 1:
+        raise ConfigError("artifacts.retention_days must be a positive integer")
+    max_runs = raw.get("max_runs_per_user")
+    if not isinstance(max_runs, int) or max_runs < 1:
+        raise ConfigError("artifacts.max_runs_per_user must be a positive integer")
+    return ArtifactConfig(
+        path=Path(str(path_raw)),
+        retention_days=retention_days,
+        max_runs_per_user=max_runs,
     )
 
 

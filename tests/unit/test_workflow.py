@@ -1,8 +1,18 @@
 from __future__ import annotations
 
+import json
 from datetime import date
+from pathlib import Path
 
-from meal_orchestrator.domain import LlmResult, ProviderMenuRequest, RunContext, WorkflowStatus
+from meal_orchestrator.artifacts import ArtifactStore
+from meal_orchestrator.config.models import ArtifactConfig
+from meal_orchestrator.domain import (
+    LlmResult,
+    ProviderMenuRequest,
+    ProviderResult,
+    RunContext,
+    WorkflowStatus,
+)
 from meal_orchestrator.workflow import UserWorkflowExecutor
 from tests.unit.helpers import (
     FakeDiscordClient,
@@ -22,7 +32,9 @@ class FakeProvider:
 
     def get_canonical_week_menu(self, request: ProviderMenuRequest):
         self.requests.append(request)
-        return canonical_menu(complete=self.complete)
+        return ProviderResult(
+            menu=canonical_menu(complete=self.complete), raw_response={"raw": True}
+        )
 
 
 class FakeLlmClient:
@@ -108,7 +120,74 @@ def test_incomplete_menu_skips_llm_and_email(tmp_path) -> None:
     assert len(discord.messages) == 1
 
 
-def _executor(tmp_path, provider, llm, email, discord) -> UserWorkflowExecutor:
+def test_artifacts_written_on_successful_run(tmp_path: Path) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    artifacts_dir = tmp_path / "artifacts"
+    store = ArtifactStore(
+        ArtifactConfig(path=artifacts_dir, retention_days=14, max_runs_per_user=10)
+    )
+
+    executor = _executor(
+        tmp_path, FakeProvider(), FakeLlmClient(), FakeEmailClient(), FakeDiscordClient(), store
+    )
+    executor.execute(user_config(prompt_file.relative_to(tmp_path)), _context(dry_run=False))
+
+    run_dir = artifacts_dir / "alan" / "run-1"
+    assert (run_dir / "provider_raw.json").exists()
+    assert (run_dir / "canonical_menu.json").exists()
+    assert (run_dir / "llm_request.json").exists()
+    assert (run_dir / "llm_response.txt").exists()
+    metadata = json.loads((run_dir / "metadata.json").read_text())
+    assert metadata["status"] == "completed"
+    assert metadata["user_id"] == "alan"
+
+
+def test_llm_request_artifact_saved_on_dry_run(tmp_path: Path) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    artifacts_dir = tmp_path / "artifacts"
+    store = ArtifactStore(
+        ArtifactConfig(path=artifacts_dir, retention_days=14, max_runs_per_user=10)
+    )
+
+    executor = _executor(
+        tmp_path, FakeProvider(), FakeLlmClient(), FakeEmailClient(), FakeDiscordClient(), store
+    )
+    executor.execute(user_config(prompt_file.relative_to(tmp_path)), _context(dry_run=True))
+
+    run_dir = artifacts_dir / "alan" / "run-1"
+    assert (run_dir / "llm_request.json").exists()
+    assert not (run_dir / "llm_response.txt").exists()
+    metadata = json.loads((run_dir / "metadata.json").read_text())
+    assert metadata["status"] == "completed"
+
+
+def test_metadata_written_on_failed_run(tmp_path: Path) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    artifacts_dir = tmp_path / "artifacts"
+    store = ArtifactStore(
+        ArtifactConfig(path=artifacts_dir, retention_days=14, max_runs_per_user=10)
+    )
+
+    executor = _executor(
+        tmp_path,
+        FakeProvider(complete=False),
+        FakeLlmClient(),
+        FakeEmailClient(),
+        FakeDiscordClient(),
+        store,
+    )
+    executor.execute(user_config(prompt_file.relative_to(tmp_path)), _context(dry_run=False))
+
+    run_dir = artifacts_dir / "alan" / "run-1"
+    assert (run_dir / "canonical_menu.json").exists()
+    metadata = json.loads((run_dir / "metadata.json").read_text())
+    assert metadata["status"] == "menu_unavailable"
+
+
+def _executor(tmp_path, provider, llm, email, discord, artifact_store=None) -> UserWorkflowExecutor:
     return UserWorkflowExecutor(
         app_config=app_config(),
         provider=provider,
@@ -116,6 +195,7 @@ def _executor(tmp_path, provider, llm, email, discord) -> UserWorkflowExecutor:
         email_client=email,
         discord_client=discord,
         project_root=tmp_path,
+        artifact_store=artifact_store,
     )
 
 

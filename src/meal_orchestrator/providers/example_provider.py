@@ -11,6 +11,7 @@ from meal_orchestrator.domain import (
     MealVariant,
     Nutrition,
     ProviderMenuRequest,
+    ProviderResult,
     PurchasedMeal,
 )
 
@@ -31,13 +32,13 @@ class ExampleProviderAdapter:
     def get_canonical_week_menu(
         self,
         request: ProviderMenuRequest,
-    ) -> CanonicalMenu:
+    ) -> ProviderResult:
         raw_menu = _placeholder_raw_menu(
             request.week_start,
             request.week_end,
             request.provider_offering_id,
         )
-        return normalize_example_provider_menu(
+        menu = normalize_example_provider_menu(
             raw_menu=raw_menu,
             provider_id=self.provider_id,
             week_start=request.week_start,
@@ -45,6 +46,7 @@ class ExampleProviderAdapter:
             user_id=request.user_id,
             purchased_meals=request.purchased_meals,
         )
+        return ProviderResult(menu=menu, raw_response=raw_menu)
 
 
 def normalize_example_provider_menu(

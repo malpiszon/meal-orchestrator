@@ -26,11 +26,19 @@ class DeliveryConfig:
 
 
 @dataclass(frozen=True)
+class ArtifactConfig:
+    path: Path
+    retention_days: int
+    max_runs_per_user: int
+
+
+@dataclass(frozen=True)
 class AppConfig:
     runtime: RuntimeConfig
     llm: LlmConfig
     default_provider: str
     delivery: DeliveryConfig
+    artifacts: ArtifactConfig | None = None
 
 
 @dataclass(frozen=True)

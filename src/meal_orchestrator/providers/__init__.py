@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from meal_orchestrator.domain import CanonicalMenu, ProviderMenuRequest
+from meal_orchestrator.domain import ProviderMenuRequest, ProviderResult
 
 
 class MenuUnavailableError(RuntimeError):
@@ -15,7 +15,7 @@ class ProviderAdapter(Protocol):
     def get_canonical_week_menu(
         self,
         request: ProviderMenuRequest,
-    ) -> CanonicalMenu: ...
+    ) -> ProviderResult: ...
 
 
 def build_provider_adapter(provider_id: str) -> ProviderAdapter:

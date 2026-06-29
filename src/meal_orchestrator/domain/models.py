@@ -107,6 +107,12 @@ class CanonicalMenu:
 
 
 @dataclass(frozen=True)
+class ProviderResult:
+    menu: CanonicalMenu
+    raw_response: Any = None
+
+
+@dataclass(frozen=True)
 class PromptPayload:
     user_prompt: str
     menu: CanonicalMenu

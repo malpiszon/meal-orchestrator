@@ -13,3 +13,9 @@ providers:
 delivery:
   email_from: "Meal Orchestrator <meals@example.com>"
   operational_discord_webhook_env: "DISCORD_OPS_WEBHOOK_URL"
+
+artifacts:
+  enabled: true
+  path: "/data/artifacts"
+  retention_days: 14
+  max_runs_per_user: 10

@@ -8,6 +8,7 @@ from pathlib import Path
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
+from meal_orchestrator.artifacts import ArtifactStore
 from meal_orchestrator.config import AppConfig, UserConfig
 from meal_orchestrator.delivery import DiscordClient, EmailClient
 from meal_orchestrator.domain import (
@@ -74,6 +75,11 @@ class RunOrchestrator:
         email_client = self.email_client_override or EmailClient()
         llm_client = self.llm_client_override or OpenRouterClient()
         provider_factory = self.provider_factory_override or build_provider_adapter
+        artifact_store = ArtifactStore(self.app_config.artifacts)
+        try:
+            artifact_store.cleanup()
+        except Exception:
+            logger.warning("artifact cleanup failed", exc_info=True, extra={"run_id": run_id})
 
         results: list[WorkflowResult] = []
         for user in selected_users:
@@ -89,6 +95,7 @@ class RunOrchestrator:
                     email_client=email_client,
                     discord_client=discord_client,
                     project_root=self.project_root,
+                    artifact_store=artifact_store,
                 )
                 result = executor.execute(
                     user,
