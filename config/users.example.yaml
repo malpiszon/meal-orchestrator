@@ -7,8 +7,19 @@ users:
     discord_user_id: "123456789012345678"
     discord_webhook_env: "DISCORD_EXAMPLE_WEBHOOK_URL"
     prompt_file: "prompts/example.md"
+    # Meal types use canonical names defined by the app, not provider-specific names.
+    # Each provider adapter maps its own naming to these canonical types.
+    # Supported types: breakfast, second_breakfast, lunch, tea, dinner, snack
     purchased_meals:
       - type: "breakfast"
         size: "M"
+      - type: "second_breakfast"
+        size: "S"
       - type: "lunch"
         size: "XL"
+      - type: "tea"
+        size: "S"
+      - type: "dinner"
+        size: "L"
+      - type: "snack"
+        size: "S"
