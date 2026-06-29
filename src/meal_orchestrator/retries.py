@@ -82,7 +82,7 @@ def with_retries[T](
                     exc,
                 )
                 raise RetryError(
-                    f"{operation_name} failed after {max_attempts} attempt(s)",
+                    f"{operation_name} failed after {max_attempts} attempt(s): {exc}",
                     last_exception=exc,
                 ) from exc
 
