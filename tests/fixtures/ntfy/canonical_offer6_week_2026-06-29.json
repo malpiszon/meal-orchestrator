@@ -191,6 +191,285 @@
           ]
         }
       ]
+    },
+    {
+      "date": "2026-07-01",
+      "meals": [
+        {
+          "type": "breakfast",
+          "variants": [
+            {
+              "name": "Miniomlety z brokułem i papryką, sos pomidorowy",
+              "composition": "omlety 81% (JAJA kurze, brokuł, papryka czerwona, szczypiorek, olej rzepakowy, sól, pieprz czarny), sos 15% (pulpa pomidorowa (pomidory, regulator kwasowości: kwas cytrynowy), cebula biała, koncentrat pomidorowy 30%, czosnek, olej rzepakowy, sól, pieprz czarny), sałata mix 3%, dynia pestki 1%",
+              "nutrition": {
+                "protein_g": 26.5,
+                "fat_g": 22.2,
+                "saturated_fat_g": 5.6,
+                "carbs_g": 13.4,
+                "sugar_g": 7.8,
+                "fiber_g": 4.1,
+                "salt_g": 1.6
+              }
+            },
+            {
+              "name": "Pasztet ze śliwką wędzoną, sos chrzanowy, chleb żytni z dynią, ogórki kiszone",
+              "composition": "pasztet 36% (kurczak udko, wieprzowina, JAJA kurze, wątróbka drobiowa, masło 82% tł. (zawiera MLEKO), cebula biała, śliwki suszone wędzone, marchew, pietruszka, por, czosnek, sól, pieprz czarny, olej rzepakowy, gałka muszkatołowa, majeranek, ziele angielskie), chleb żytni z dynią 28% (Zakwas ŻYTNI, mąka ŻYTNIA 720, woda, pestki dyni, drożdże, mąka PSZENNA 750, cukier, sól), ogórek kiszony 26% (ogórki, woda, przyprawy (GORCZYCA), sól), sos 10% (jogurt naturalny 2% tłuszczu (MLEKO, białka MLEKA, kultury bakterii jogurtowych), chrzan (zawiera MLEKO i DWUTLENEK SIARKI))",
+              "nutrition": {
+                "protein_g": 16.7,
+                "fat_g": 19.4,
+                "saturated_fat_g": 6.9,
+                "carbs_g": 35.8,
+                "sugar_g": 6.2,
+                "fiber_g": 3.6,
+                "salt_g": 3.0
+              }
+            },
+            {
+              "name": "Granola z orzeszkami ziemnymi, jogurt grecki, borówki z truskawkami",
+              "composition": "jogurt grecki light 57% (MLEKO pasteryzowane częściowo odtłuszczone, odtłuszczone MLEKO w proszku, żywe kultury bakterii jogurtowych), granola 18% (płatki OWSIANE, ORZESZKI ZIEMNE, pasta z orzeszków ziemnych (ORZESZKI ZIEMNE prażone), ORZESZKI ZIEMNE, miód pszczeli, masło 82% tł. (zawiera MLEKO), sól), truskawki 18%, borówka amerykańska 7%",
+              "nutrition": {
+                "protein_g": 15.7,
+                "fat_g": 20.0,
+                "saturated_fat_g": 6.1,
+                "carbs_g": 33.4,
+                "sugar_g": 15.7,
+                "fiber_g": 4.4,
+                "salt_g": 0.3
+              }
+            }
+          ]
+        },
+        {
+          "type": "lunch",
+          "variants": [
+            {
+              "name": "Pierś kurczaka w sosie chrzanowym z koperkiem, kasza gryczana, ogórek małosolny",
+              "composition": "kurczak 35% (kurczak (pierś), czosnek, olej rzepakowy, bazylia, imbir, pieprz czarny, sól, zioła prowansalskie, woda), ogórek małosolny 25% (Ogórki, woda, sól, przyprawy), sos 22% (śmietanka 30% tł. (MLEKO, stabilizator: karagen, mleczan wapnia), chrzan (zawiera MLEKO i DWUTLENEK SIARKI), woda, wywar warzywny, mąka ziemniaczana, pieprz czarny, sól), kasza gryczana 18% (kasza gryczana, sól), koperek",
+              "nutrition": {
+                "protein_g": 69.5,
+                "fat_g": 30.8,
+                "saturated_fat_g": 15.4,
+                "carbs_g": 51.9,
+                "sugar_g": 7.1,
+                "fiber_g": 3.4,
+                "salt_g": 2.9
+              }
+            },
+            {
+              "name": "Pełnoziarniste tagliatelle z indykiem w śmietankowo-szpinakowym sosie, mix sałat z ogórkiem i papryką, winegret balsamiczny",
+              "composition": "makaron 30% (makaron pełnoziarnisty (mąka makaronowa PSZENNA pełnoziarnista), sól, olej rzepakowy), indyk 25% (indyk, czosnek, olej rzepakowy, liść laurowy, pieprz czarny, sól, zioła prowansalskie, woda), sos 24% (śmietanka 18% tł. ((MLEKO, stabilizator: karagen)), szpinak, cebula biała, czosnek, olej rzepakowy, sól, gałka muszkatołowa, pieprz czarny), ogórek zielony 8%, papryka czerwona 8%, sos winegret 3% (olej rzepakowy, miód pszczeli, sok z cytryny, musztarda dijon (woda, GORCZYCA, ocet spirytusowy, sól), ocet balsamiczny, sól), sałata mix 3%",
+              "nutrition": {
+                "protein_g": 54.2,
+                "fat_g": 29.9,
+                "saturated_fat_g": 10.6,
+                "carbs_g": 66.1,
+                "sugar_g": 11.1,
+                "fiber_g": 14.6,
+                "salt_g": 1.1
+              }
+            },
+            {
+              "name": "Koreańskie tofu w lepkim sosie gochujang, czarny ryż, brokuły na parze",
+              "composition": "tofu 37% (tofu (woda, SOJA, stabilizator: siarczan wapnia), olej rzepakowy, sos tamari (woda, SOJA, sól, ocet spirytusowy), czosnek, papryka gochugaru, papryka słodka, sól, pieprz czarny), sos 23% (woda, pulpa pomidorowa (pomidory, regulator kwasowości: kwas cytrynowy), ocet ryżowy (woda, ryż), ksylitol, pasta Gochujang (zawiera GLUTEN i SOJĘ), sos sojowy jasny (woda, SOJA, sól, mąka PSZENNA, cukier), mąka ziemniaczana, miód pszczeli, olej sezamowy (olej SOJOWY, olej SEZAMOWY), czosnek, sos sojowy ciemny (woda, barwnik: karmel, cukier, sól, SOJA, barwnik: karmel amoniakalny, PSZENICA), imbir, olej rzepakowy), ryż 23% (ryż czarny, sól), brokuły 17%, SEZAM biały",
+              "nutrition": {
+                "protein_g": 35.7,
+                "fat_g": 31.8,
+                "saturated_fat_g": 4.5,
+                "carbs_g": 78.0,
+                "sugar_g": 10.3,
+                "fiber_g": 5.9,
+                "salt_g": 3.3
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "date": "2026-07-02",
+      "meals": [
+        {
+          "type": "breakfast",
+          "variants": [
+            {
+              "name": "Sałatka z kurczakiem, żółtym serem, pomidorkami i sosem Cezara",
+              "composition": "kurczak 32% (pierś kurczaka, czosnek, olej rzepakowy, sól, papryka słodka, woda, pieprz czarny, tymianek), pomidorki 26%, sos 17% (majonez (olej rzepakowy, musztarda (woda, ocet, GORCZYCA, sól, przyprawy), woda, żółtka JAJ kurzych), jogurt naturalny 2% tłuszczu (MLEKO, białka MLEKA, kultury bakterii jogurtowych), ser parmezan (MLEKO, sól, stabilizator: chlorek wapnia, podpuszczka mikrobiologiczna, kultury bakterii, konserwant: lizozym (JAJA)), sok z cytryny, musztarda (zawiera GORCZYCĘ), anchois (ANCHOIS, olej słonecznikowy, sól), czosnek, ocet winny biały (zawiera DWUTLENEK SIARKI), pieprz czarny, olej rzepakowy), ser gouda 15% (MLEKO pasteryzowane, sól, stabilizator: chlorek wapnia, kultury bakterii fermentacji mlekowej, podpuszczka mikrobiologiczna, barwnik: karoteny), sałata rzymska 11%",
+              "nutrition": {
+                "protein_g": 34.1,
+                "fat_g": 25.1,
+                "saturated_fat_g": 7.8,
+                "carbs_g": 5.5,
+                "sugar_g": 2.1,
+                "fiber_g": 1.4,
+                "salt_g": 1.4
+              }
+            },
+            {
+              "name": "Proteinowe waniliowe naleśniki, krem czekoladowy bez cukru, gruszka",
+              "composition": "naleśniki 52% (serek wiejski (SER twarogowy ziarnisty, ŚMIETANKA pasteryzowana, sól), JAJA kurze, MLEKO spożywcze 2% tł., mąka PSZENNA, olej rzepakowy, odżywka białkowa o smaku waniliowym (Koncentrat białka serwatki (z MLEKA), stabilizator: guma arabska, regulator kwasowości: kwas jabłkowy, aromat, substancja słodząca: sukraloza), budyń waniliowy (skrobia kukurydziana, skrobia ziemniaczana, aromat, barwnik: kurkumina), sól), gruszka 32% (gruszka, sok z cytryny), krem 16% (ser śmietankowy (MLEKO pasteryzowane, ŚMIETANKA), jogurt grecki (ŚMIETANKA, MLEKO w proszku, białka MLEKA, żywe kultury bakterii jogurtowych), odżywka białkowa czekoladowa (Koncentrat białka serwatki (z MLEKA), stabilizator: guma arabska, regulator kwasowości: kwas jabłkowy, aromat, substancja słodząca: sukraloza), kakao)",
+              "nutrition": {
+                "protein_g": 19.2,
+                "fat_g": 15.7,
+                "saturated_fat_g": 8.3,
+                "carbs_g": 37.8,
+                "sugar_g": 9.4,
+                "fiber_g": 3.7,
+                "salt_g": 0.9
+              }
+            },
+            {
+              "name": "Wegetariańskie English breakfast z jajkiem sadzonym, chleb razowy",
+              "composition": "fasola 29% (fasola biała, pulpa pomidorowa (pomidory, regulator kwasowości: kwas cytrynowy), koncentrat pomidorowy 30%, cebula biała, olej rzepakowy, sól, czosnek, ksylitol, pieprz czarny), jajka 29% (JAJA kurze, olej rzepakowy, sól, pieprz czarny), chleb razowy 20% (Mąka ŻYTNIA (w tym mąka ŻYTNIA razowa), woda, sól), pieczarki 18% (pieczarki, cebula biała, czosnek, olej rzepakowy, pieprz czarny, sól), szpinak 4%",
+              "nutrition": {
+                "protein_g": 24.7,
+                "fat_g": 15.6,
+                "saturated_fat_g": 3.8,
+                "carbs_g": 38.2,
+                "sugar_g": 7.0,
+                "fiber_g": 7.7,
+                "salt_g": 2.6
+              }
+            }
+          ]
+        },
+        {
+          "type": "lunch",
+          "variants": [
+            {
+              "name": "Pulpeciki drobiowe w sosie carbonara, bezglutenowe spaghetti, szpinak blanszowany z suszonymi pomidorami",
+              "composition": "pulpecik 34% (kurczak (pierś), kurczak udko, JAJA kurze, olej rzepakowy, mąka OWSIANA bezglutenowa, czosnek, przyprawa gyros (sól, curry, chili, kolendra, papryka słodka, czosnek, pieprz ziołowy, cebula), sól, pieprz czarny), szpinak 25% (szpinak, pomidory suszone w oleju (pomidory suszone, olej roślinny, ocet winny), olej rzepakowy, czosnek, pieprz czarny, sól), makaron 21% (makaron spaghetti bezglutenowy (ryż brązowy, żółta kukurydza, biała kukurydza, ryż biały, skrobia ziemniaczana, emulgator: mono- i diglicerydy kwasów tłuszczowych), sól, olej rzepakowy), sos 19% (śmietanka 18% tł. ((MLEKO, stabilizator: karagen)), woda, boczek wędzony (zawiera SOJĘ), cebula biała, natka pietruszki, wywar warzywny, mąka ziemniaczana, sól, pieprz czarny, gałka muszkatołowa)",
+              "nutrition": {
+                "protein_g": 45.9,
+                "fat_g": 37.2,
+                "saturated_fat_g": 8.4,
+                "carbs_g": 58.4,
+                "sugar_g": 4.6,
+                "fiber_g": 6.2,
+                "salt_g": 2.7
+              }
+            },
+            {
+              "name": "Bitki wieprzowe w sosie z zielonego pieprzu, puree ziemniaczane, surówka buraczkowa",
+              "composition": "bitki 29% (łopatka wieprzowa, musztarda dijon (woda, GORCZYCA, ocet spirytusowy, sól), czosnek, sos tamari (woda, SOJA, sól, ocet spirytusowy), olej rzepakowy, sól, pomarańcza, pieprz czarny), puree 29% (ziemniaki, MLEKO spożywcze 2% tł., masło 82% tł. (zawiera MLEKO), sól, pieprz czarny), surówka 22% (burak, sok z cytryny, czosnek, sól, olej rzepakowy, erytrytol, ksylitol, pieprz czarny, woda), sos 20% (śmietanka 18% tł. ((MLEKO, stabilizator: karagen)), woda, cebula szalotka, zielony pieprz (pieprz zielony ziarnisty, woda, ocet spirytusowy, sól, regulator kwasowości: kwas octowy), czosnek, bulion wołowy, sos sojowy tamari (woda, ziarno SOI, sól, ocet spirytusowy), mąka ziemniaczana, czerwony pieprz, olej rzepakowy, pieprz biały)",
+              "nutrition": {
+                "protein_g": 44.5,
+                "fat_g": 42.9,
+                "saturated_fat_g": 17.2,
+                "carbs_g": 43.7,
+                "sugar_g": 11.3,
+                "fiber_g": 6.0,
+                "salt_g": 4.0
+              }
+            },
+            {
+              "name": "Ziemniaczane gnocchi w warzywnym sosie primavera z ciecierzycą i serem mozzarella",
+              "composition": "sos 38% (woda, pomidory (Pomidory kostka, sok pomidorowy, kwas cytrynowy), cukinia, fasolka szparagowa zielona, pulpa pomidorowa (pomidory, regulator kwasowości: kwas cytrynowy), marchew, ser parmezan (MLEKO, sól, stabilizator: chlorek wapnia, podpuszczka mikrobiologiczna, kultury bakterii, konserwant: lizozym (JAJA)), cebula biała, masło 82% tł. (zawiera MLEKO), wywar warzywny, czosnek, pomidory suszone z bazylią i czosnkiem (pomidory suszone, czosnek, sól, bazylia), sól, olej rzepakowy, oregano, pieprz czarny, bazylia), gnocchi 34% (gnocchi ziemniaczane (woda, płatki ziemniaczane, skrobia kukurydziana, skrobia ziemniaczana, mąka PSZENNA, sól, mąka ryżowa), olej rzepakowy), ciecierzyca 19%, ser mozzarella 8% (MLEKO pasteryzowane, sól, regulator kwasowości: kwas cytrynowy, kultury bakterii kwasu mlekowego, podpuszczka mikrobiologiczna)",
+              "nutrition": {
+                "protein_g": 30.2,
+                "fat_g": 15.2,
+                "saturated_fat_g": 6.5,
+                "carbs_g": 120.1,
+                "sugar_g": 14.9,
+                "fiber_g": 9.2,
+                "salt_g": 6.2
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "date": "2026-07-03",
+      "meals": [
+        {
+          "type": "breakfast",
+          "variants": [
+            {
+              "name": "Mini omlet z masłem orzechowym, twarożek waniliowy, mus jagodowy",
+              "composition": "twarożek 35% (SER twarogowy półtłusty, jogurt grecki light (MLEKO pasteryzowane częściowo odtłuszczone, odtłuszczone MLEKO w proszku, żywe kultury bakterii jogurtowych), ksylitol, ksylitol waniliowy (ksylitol, wanilia naturalna mielona)), omlet 30% (JAJA kurze, białko JAJA kurzego, ksylitol, mąka ryżowa, MLEKO spożywcze 2% tł., mąka kokosowa, olej rzepakowy, ksylitol waniliowy (ksylitol, wanilia naturalna mielona), soda oczyszczona, sól), mus 25% (jagody, erytrytol, sok z cytryny), pasta z orzeszków ziemnych 10% (ORZESZKI ZIEMNE prażone, ORZESZKI ZIEMNE kawałki)",
+              "nutrition": {
+                "protein_g": 24.2,
+                "fat_g": 22.1,
+                "saturated_fat_g": 5.7,
+                "carbs_g": 29.4,
+                "sugar_g": 8.5,
+                "fiber_g": 2.4,
+                "salt_g": 0.6
+              }
+            },
+            {
+              "name": "Bułeczka razowa z dynią, pomidorowym masełkiem, serem edamskim i szynką z indyka, ogórek",
+              "composition": "kanapka 60% (bułeczka razowa z pestkami dyni (Mąka PSZENNA 500, mąka ŻYTNIA 2000, woda, drożdże, cukier, sól, pestki dyni), ser edamski (MLEKO, sól, stabilizator: chlorek wapnia, kultury bakterii, barwnik: annato), masło 82% tł. (zawiera MLEKO), szynka z indyka (zawiera SELER i SOJĘ), koncentrat pomidorowy 30%, pomidory suszone w oleju (pomidory suszone, olej roślinny, ocet winny), bazylia, sól, pieprz czarny), ogórek zielony 40%",
+              "nutrition": {
+                "protein_g": 12.7,
+                "fat_g": 19.4,
+                "saturated_fat_g": 8.4,
+                "carbs_g": 32.8,
+                "sugar_g": 2.3,
+                "fiber_g": 3.1,
+                "salt_g": 1.5
+              }
+            },
+            {
+              "name": "Karmelowa granola z orzechami pekan, proteinowy jogurt bananowy, jabłko",
+              "composition": "jogurt bananowy 58% (jogurt naturalny 2% tłuszczu (MLEKO, białka MLEKA, kultury bakterii jogurtowych), banan, odżywka białkowa o smaku waniliowym (Koncentrat białka serwatki (z MLEKA), stabilizator: guma arabska, regulator kwasowości: kwas jabłkowy, aromat, substancja słodząca: sukraloza)), jabłko 27% (jabłko, sok z cytryny), granola 15% (płatki OWSIANE, pasta z orzeszków ziemnych (ORZESZKI ZIEMNE prażone, ORZESZKI ZIEMNE kawałki), daktyle suszone (zawiera DWUTLENEK SIARKI), ORZECHY PEKAN, daktyle suszone (zawiera DWUTLENEK SIARKI), woda mineralna niegazowana, olej rzepakowy, miód pszczeli, mąka PSZENNA pełnoziarnista, woda, sól himalajska)",
+              "nutrition": {
+                "protein_g": 15.3,
+                "fat_g": 13.4,
+                "saturated_fat_g": 2.7,
+                "carbs_g": 45.9,
+                "sugar_g": 23.7,
+                "fiber_g": 4.8,
+                "salt_g": 0.2
+              }
+            }
+          ]
+        },
+        {
+          "type": "lunch",
+          "variants": [
+            {
+              "name": "Polędwiczka wieprzowa w sosie porowym, kasza gryczana, surówka z marchewki i jabłka",
+              "composition": "wieprzowina 31% (wieprzowina, polędwica, miód pszczeli, olej rzepakowy, majeranek, musztarda (zawiera GORCZYCĘ), papryka słodka, sambal oelek, sól, woda), surówka marchewkowa z jabłkiem 29% (marchew, jabłko, olej rzepakowy, sok z cytryny, sól, ekstrakt przypraw), kasza gryczana 23% (kasza gryczana, sól), sos 17% (por, śmietanka 18% tł. ((MLEKO, stabilizator: karagen)), woda, musztarda dijon (woda, GORCZYCA, ocet spirytusowy, sól), olej rzepakowy, mąka ziemniaczana, pieprz czarny, sól), koperek",
+              "nutrition": {
+                "protein_g": 59.2,
+                "fat_g": 23.4,
+                "saturated_fat_g": 7.1,
+                "carbs_g": 68.2,
+                "sugar_g": 16.5,
+                "fiber_g": 5.9,
+                "salt_g": 1.0
+              }
+            },
+            {
+              "name": "Sznycle z kurczaka w sosie porowym, mix kasz, fasolka szparagowa w pomidorach",
+              "composition": "sznycel z kurczaka 35% (kurczak (pierś), musztarda (zawiera GORCZYCĘ), olej rzepakowy, koncentrat pomidorowy 30%, sos sojowy ciemny (woda, barwnik: karmel, cukier, sól, SOJA, barwnik: karmel amoniakalny, PSZENICA), miód pszczeli, czosnek, papryka słodka, imbir, chili, sól, pieprz czarny), mix kasz 25% (kasza jaglana, kasza gryczana, kasza JĘCZMIENNA pęczak, sól), sos 22% (por, śmietanka 30% tł. (MLEKO, stabilizator: karagen, mleczan wapnia), woda, olej rzepakowy, musztarda dijon (woda, GORCZYCA, ocet spirytusowy, sól), czosnek, mąka ziemniaczana, pieprz czarny, sól), fasolka 17% (fasolka szparagowa zielona, pulpa pomidorowa (pomidory, regulator kwasowości: kwas cytrynowy), woda, koncentrat pomidorowy 30%, cebula biała, erytrytol, sól, czosnek, olej rzepakowy, pieprz czarny)",
+              "nutrition": {
+                "protein_g": 63.7,
+                "fat_g": 25.7,
+                "saturated_fat_g": 7.3,
+                "carbs_g": 62.6,
+                "sugar_g": 12.5,
+                "fiber_g": 6.3,
+                "salt_g": 2.2
+              }
+            },
+            {
+              "name": "Stek z wędzonego tofu z fasolką edamame w sosie teriyaki bez cukru, ryż jaśminowy z orzeszkami ziemnymi, pieczone brokuły",
+              "composition": "tofu 49% (tofu wędzone (woda, SOJA, sól, substancja wiążąca: siarczan wapnia, aromat dymu wędzarniczego wyprodukowany z buczyny), koncentrat pomidorowy 30%, syrop klonowy, woda, sos sojowy ciemny (woda, barwnik: karmel, cukier, sól, SOJA, barwnik: karmel amoniakalny, PSZENICA), musztarda (woda, GORCZYCA, ocet spirytusowy, sól), sos sojowy ponzu (woda, sos SOJOWY (woda, ziarno SOI, PSZENICA, sól), cukier, ocet spirytusowy, koncentrat cytrynowy, sól, naturalny aromat cytrynowy, ekstrakt drożdżowy), ocet jabłkowy (zawiera DWUTLENEK SIARKI), papryka wędzona, sól, pieprz czarny), ryż 16% (ryż jaśminowy, sól), sos 13% (woda, sos tamari (woda, SOJA, sól, ocet spirytusowy), ksylitol, olej sezamowy (olej SOJOWY, olej SEZAMOWY), mąka OWSIANA, sos sojowy ciemny (woda, barwnik: karmel, cukier, sól, SOJA, barwnik: karmel amoniakalny, PSZENICA), sok z limonki, czosnek, imbir, olej rzepakowy), brokuły 10% (brokuły, sos tamari (woda, SOJA, sól, ocet spirytusowy), woda, ksylitol, olej rzepakowy, sok z limonki, czosnek, mąka ORKISZOWA, imbir), fasola edamame 9%, ORZESZKI ZIEMNE 1%, szczypiorek",
+              "nutrition": {
+                "protein_g": 42.1,
+                "fat_g": 36.0,
+                "saturated_fat_g": 5.7,
+                "carbs_g": 76.3,
+                "sugar_g": 19.3,
+                "fiber_g": 7.8,
+                "salt_g": 9.3
+              }
+            }
+          ]
+        }
+      ]
     }
   ]
 }
