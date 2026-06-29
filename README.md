@@ -4,9 +4,9 @@ Scheduled automation service that fetches weekly meal menus from diet catering
 providers, filters them to purchased meals, sends the payload to an LLM through
 OpenRouter, then delivers the recommendation by email and Discord.
 
-The ntfy provider integration is implemented. LLM, email, and Discord delivery
-are still stubs; use `--dry-run` to exercise the full workflow without real
-external calls.
+The ntfy provider integration and OpenRouter LLM client are implemented. Email
+and Discord delivery are still stubs; use `--dry-run` to exercise the full
+workflow without real external calls.
 
 ## Local usage
 
