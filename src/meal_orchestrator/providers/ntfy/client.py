@@ -9,8 +9,9 @@ import uuid
 from datetime import date, timedelta
 from typing import Any
 
+from meal_orchestrator import USER_AGENT
 from meal_orchestrator.providers import MenuUnavailableError
-from meal_orchestrator.retries import with_retries
+from meal_orchestrator.retries import is_transient_http_error, with_retries
 
 logger = logging.getLogger(__name__)
 
@@ -32,17 +33,10 @@ def _build_headers() -> dict[str, str]:
         "Trace-Id": str(uuid.uuid4()),
         "Origin": "https://ntfy.pl",
         "Referer": "https://ntfy.pl/",
-        "User-Agent": "meal-orchestrator/0.1",
+        "User-Agent": USER_AGENT,
         "Content-Type": "application/json",
     }
 
-
-def _is_transient(exc: Exception) -> bool:
-    if isinstance(exc, urllib.error.HTTPError):
-        return exc.code in (429, 500, 502, 503, 504)
-    if isinstance(exc, (urllib.error.URLError, TimeoutError)):
-        return True
-    return False
 
 
 def _fetch_day_raw(date_str: str, offer_id: int | str) -> dict[str, Any]:
@@ -90,7 +84,7 @@ def _fetch_day_with_retries(date_str: str, offer_id: int | str) -> dict[str, Any
         max_attempts=_MAX_ATTEMPTS,
         base_delay_seconds=_BASE_DELAY,
         backoff_factor=_BACKOFF_FACTOR,
-        retryable=_is_transient,
+        retryable=is_transient_http_error,
         operation_name=f"ntfy fetch date={date_str}",
     )
 

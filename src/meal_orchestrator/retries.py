@@ -2,9 +2,19 @@ from __future__ import annotations
 
 import logging
 import time
+import urllib.error
 from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
+
+
+def is_transient_http_error(exc: Exception) -> bool:
+    """Return True for HTTP errors that are safe to retry."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code in (429, 500, 502, 503, 504)
+    if isinstance(exc, (urllib.error.URLError, TimeoutError)):
+        return True
+    return False
 
 
 class RetryError(RuntimeError):

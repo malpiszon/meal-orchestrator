@@ -58,6 +58,7 @@ class UserWorkflowExecutor:
         final_status = WorkflowStatus.FAILED
         final_model: str | None = None
         final_token_usage: dict | None = None
+        final_error: str | None = None
 
         logger.info("user workflow started", extra={**log_context, "step": "start"})
         try:
@@ -121,7 +122,10 @@ class UserWorkflowExecutor:
                         EmailMessage(
                             to=user.email,
                             from_address=self.app_config.delivery.email_from,
-                            subject=f"Meal plan for {run_context.week_start.isoformat()}",
+                            subject=(
+                            f"Meal plan for {run_context.week_start.isoformat()}"
+                            f" – {run_context.week_end.isoformat()}"
+                        ),
                             body=llm_result.text,
                         ),
                         idempotency_key=f"{run_context.run_id}:{user.id}:email",
@@ -166,6 +170,7 @@ class UserWorkflowExecutor:
             final_status = WorkflowStatus.COMPLETED
             return WorkflowResult(user_id=user.id, status=WorkflowStatus.COMPLETED)
         except MenuUnavailableError as exc:
+            final_error = str(exc)
             logger.info("menu unavailable", extra={**log_context, "step": "provider"})
             final_status = WorkflowStatus.MENU_UNAVAILABLE
             if not run_context.skip_discord and not run_context.dry_run and user.discord_webhook_env:  # noqa: E501
@@ -191,31 +196,33 @@ class UserWorkflowExecutor:
                 detail=str(exc),
             )
         except Exception as exc:
+            final_error = str(exc)
             logger.error(
                 "user workflow failed",
                 exc_info=True,
-                extra={**log_context, "step": "failed", "error": str(exc)},
+                extra={**log_context, "step": "failed", "error": final_error},
             )
             return WorkflowResult(
                 user_id=user.id,
                 status=WorkflowStatus.FAILED,
-                detail=str(exc),
+                detail=final_error,
             )
         finally:
-            artifacts.save_metadata(
-                {
-                    "run_id": run_context.run_id,
-                    "user_id": user.id,
-                    "provider": run_context.provider_id,
-                    "week_start": run_context.week_start.isoformat(),
-                    "week_end": run_context.week_end.isoformat(),
-                    "model": final_model,
-                    "token_usage": final_token_usage,
-                    "started_at": started_at.isoformat(),
-                    "ended_at": datetime.now(UTC).isoformat(),
-                    "status": str(final_status),
-                }
-            )
+            metadata: dict = {
+                "run_id": run_context.run_id,
+                "user_id": user.id,
+                "provider": run_context.provider_id,
+                "week_start": run_context.week_start.isoformat(),
+                "week_end": run_context.week_end.isoformat(),
+                "model": final_model,
+                "token_usage": final_token_usage,
+                "started_at": started_at.isoformat(),
+                "ended_at": datetime.now(UTC).isoformat(),
+                "status": str(final_status),
+            }
+            if final_error is not None:
+                metadata["error"] = final_error
+            artifacts.save_metadata(metadata)
 
 
 def _json_size(menu) -> int:
