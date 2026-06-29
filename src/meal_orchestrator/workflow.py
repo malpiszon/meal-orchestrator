@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from meal_orchestrator.artifacts import ArtifactStore
 from meal_orchestrator.config import AppConfig, UserConfig
 from meal_orchestrator.delivery import DiscordClient, EmailClient
 from meal_orchestrator.domain import (
@@ -35,6 +36,7 @@ class UserWorkflowExecutor:
         email_client: EmailClient,
         discord_client: DiscordClient,
         project_root: Path,
+        artifact_store: ArtifactStore | None = None,
     ) -> None:
         self.app_config = app_config
         self.provider = provider
@@ -42,6 +44,7 @@ class UserWorkflowExecutor:
         self.email_client = email_client
         self.discord_client = discord_client
         self.project_root = project_root
+        self.artifact_store = artifact_store or ArtifactStore()
 
     def execute(self, user: UserConfig, run_context: RunContext) -> WorkflowResult:
         log_context = {
@@ -50,9 +53,14 @@ class UserWorkflowExecutor:
             "provider": run_context.provider_id,
             "week_start": run_context.week_start.isoformat(),
         }
+        artifacts = self.artifact_store.for_run(run_context.run_id, user.id)
+        started_at = datetime.now(UTC)
+        final_status = WorkflowStatus.FAILED
+        final_model: str | None = None
+
         logger.info("user workflow started", extra={**log_context, "step": "start"})
         try:
-            menu = self.provider.get_canonical_week_menu(
+            provider_result = self.provider.get_canonical_week_menu(
                 ProviderMenuRequest(
                     week_start=run_context.week_start,
                     week_end=run_context.week_end,
@@ -61,6 +69,11 @@ class UserWorkflowExecutor:
                     purchased_meals=user.purchased_meals,
                 )
             )
+            menu = provider_result.menu
+            if provider_result.raw_response is not None:
+                artifacts.save_provider_raw(provider_result.raw_response)
+            artifacts.save_canonical_menu(menu)
+
             _ensure_complete_requested_menu(menu, user)
             logger.info(
                 "provider menu normalized",
@@ -77,22 +90,27 @@ class UserWorkflowExecutor:
             )
             logger.info("prompt payload built", extra={**log_context, "step": "prompt"})
 
+            llm_request = LlmRequest(
+                model=run_context.llm_model or self.app_config.llm.model,
+                payload=prompt_payload,
+                timeout_seconds=self.app_config.llm.timeout_seconds,
+            )
+
+            artifacts.save_llm_request(llm_request)
+
             if run_context.dry_run:
                 llm_result = LlmResult(
                     text="Dry-run recommendation placeholder.",
-                    model=run_context.llm_model or self.app_config.llm.model,
+                    model=llm_request.model,
                     token_usage={"prompt_tokens": 0, "completion_tokens": 0},
                 )
                 logger.info("llm generation skipped", extra={**log_context, "step": "llm"})
             else:
-                llm_result = self.llm_client.generate(
-                    LlmRequest(
-                        model=run_context.llm_model or self.app_config.llm.model,
-                        payload=prompt_payload,
-                        timeout_seconds=self.app_config.llm.timeout_seconds,
-                    )
-                )
+                llm_result = self.llm_client.generate(llm_request)
+                artifacts.save_llm_response(llm_result)
                 logger.info("llm result generated", extra={**log_context, "step": "llm"})
+
+            final_model = llm_result.model
 
             if not run_context.skip_email and not run_context.dry_run:
                 self.email_client.send(
@@ -134,9 +152,11 @@ class UserWorkflowExecutor:
                 )
 
             logger.info("user workflow completed", extra={**log_context, "step": "complete"})
+            final_status = WorkflowStatus.COMPLETED
             return WorkflowResult(user_id=user.id, status=WorkflowStatus.COMPLETED)
         except MenuUnavailableError as exc:
             logger.info("menu unavailable", extra={**log_context, "step": "provider"})
+            final_status = WorkflowStatus.MENU_UNAVAILABLE
             if not run_context.skip_discord and not run_context.dry_run:
                 try:
                     self.discord_client.notify(
@@ -169,6 +189,18 @@ class UserWorkflowExecutor:
                 user_id=user.id,
                 status=WorkflowStatus.FAILED,
                 detail=str(exc),
+            )
+        finally:
+            artifacts.save_metadata(
+                {
+                    "run_id": run_context.run_id,
+                    "user_id": user.id,
+                    "provider": run_context.provider_id,
+                    "week_start": run_context.week_start.isoformat(),
+                    "model": final_model,
+                    "started_at": started_at.isoformat(),
+                    "status": str(final_status),
+                }
             )
 
 
