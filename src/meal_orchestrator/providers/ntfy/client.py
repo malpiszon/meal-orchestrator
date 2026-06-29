@@ -129,8 +129,8 @@ class NtfyClient:
                 logger.info("ntfy: menu unavailable for date=%s", date_str)
                 raise
 
-            logger.info(
-                "ntfy: fetched date=%s offer_id=%s results=%d",
+            logger.debug(
+                "ntfy: fetched date=%s offer_id=%s raw_variants=%d",
                 date_str,
                 offer_id,
                 len(raw["results"]),
