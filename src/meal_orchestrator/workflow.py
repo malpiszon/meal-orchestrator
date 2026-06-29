@@ -123,9 +123,9 @@ class UserWorkflowExecutor:
                             to=user.email,
                             from_address=self.app_config.delivery.email_from,
                             subject=(
-                            f"Meal plan for {run_context.week_start.isoformat()}"
-                            f" – {run_context.week_end.isoformat()}"
-                        ),
+                                f"Meal plan for {run_context.week_start.isoformat()}"
+                                f" – {run_context.week_end.isoformat()}"
+                            ),
                             body=llm_result.text,
                         ),
                         idempotency_key=f"{run_context.run_id}:{user.id}:email",
