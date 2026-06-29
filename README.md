@@ -17,12 +17,18 @@ pip install -e ".[dev]"
 meal-orchestrator --config config/app.example.yaml --users config/users.example.yaml --dry-run
 ```
 
-Useful options (must be combined with `--dry-run` in this skeleton):
+Run with real LLM output but skip delivery (email and Discord are still stubs):
 
 ```bash
-meal-orchestrator --user example --week-start 2026-06-01 --dry-run
-meal-orchestrator --skip-email --skip-discord --dry-run
-meal-orchestrator --llm-model openai/gpt-4.1-mini --dry-run
+meal-orchestrator --config config/app.example.yaml --users config/users.example.yaml --skip-email --skip-discord
+meal-orchestrator --user example --week-start 2026-06-01 --skip-email --skip-discord
+meal-orchestrator --llm-model openai/gpt-4.1-nano --skip-email --skip-discord
+```
+
+Skip all external calls for local testing:
+
+```bash
+meal-orchestrator --config config/app.example.yaml --users config/users.example.yaml --dry-run
 ```
 
 ## Docker

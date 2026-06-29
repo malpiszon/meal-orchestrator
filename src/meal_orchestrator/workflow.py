@@ -57,6 +57,7 @@ class UserWorkflowExecutor:
         started_at = datetime.now(UTC)
         final_status = WorkflowStatus.FAILED
         final_model: str | None = None
+        final_token_usage: dict | None = None
 
         logger.info("user workflow started", extra={**log_context, "step": "start"})
         try:
@@ -80,6 +81,7 @@ class UserWorkflowExecutor:
                 extra={
                     **log_context,
                     "step": "provider",
+                    "days": len(menu.days),
                     "payload_bytes": _json_size(menu),
                 },
             )
@@ -111,6 +113,7 @@ class UserWorkflowExecutor:
                 logger.info("llm result generated", extra={**log_context, "step": "llm"})
 
             final_model = llm_result.model
+            final_token_usage = llm_result.token_usage
 
             if not run_context.skip_email and not run_context.dry_run:
                 self.email_client.send(
@@ -197,8 +200,11 @@ class UserWorkflowExecutor:
                     "user_id": user.id,
                     "provider": run_context.provider_id,
                     "week_start": run_context.week_start.isoformat(),
+                    "week_end": run_context.week_end.isoformat(),
                     "model": final_model,
+                    "token_usage": final_token_usage,
                     "started_at": started_at.isoformat(),
+                    "ended_at": datetime.now(UTC).isoformat(),
                     "status": str(final_status),
                 }
             )
