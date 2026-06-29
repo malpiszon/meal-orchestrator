@@ -18,7 +18,13 @@ _WEEK_END = date(2026, 7, 3)
 _MEAL_TYPE_BREAKFAST = {
     "id": 1, "diet_id": 1, "meal_name": {"key": "BREAKFAST", "value": "Śniadanie"}
 }
-_MEAL_TYPE_LUNCH = {"id": 2, "diet_id": 1, "meal_name": {"key": "LUNCH", "value": "Obiad"}}
+_MEAL_TYPE_SECOND_BREAKFAST = {
+    "id": 2, "diet_id": 1, "meal_name": {"key": "SECOND-BREAKFAST", "value": "Drugie śniadanie"}
+}
+_MEAL_TYPE_LUNCH = {"id": 3, "diet_id": 1, "meal_name": {"key": "LUNCH", "value": "Obiad"}}
+_MEAL_TYPE_TEA = {"id": 4, "diet_id": 1, "meal_name": {"key": "TEA", "value": "Podwieczorek"}}
+_MEAL_TYPE_DINNER = {"id": 5, "diet_id": 1, "meal_name": {"key": "DINNER", "value": "Kolacja"}}
+_MEAL_TYPE_SNACK = {"id": 6, "diet_id": 1, "meal_name": {"key": "SNACK", "value": "Przekąska"}}
 
 _PRODUCT_BREAKFAST_M = {
     "id": 10,
@@ -48,6 +54,18 @@ _PRODUCT_LUNCH_XL = {
     "fiber": 4.0,
     "salt": 2.0,
 }
+_PRODUCT_SECOND_BREAKFAST_S = {
+    **_PRODUCT_BREAKFAST_M, "id": 30, "name": "Jabłko", "size_tag": {"value": "S"}
+}
+_PRODUCT_TEA_S = {
+    **_PRODUCT_BREAKFAST_M, "id": 40, "name": "Herbata z mlekiem", "size_tag": {"value": "S"}
+}
+_PRODUCT_DINNER_M = {
+    **_PRODUCT_BREAKFAST_M, "id": 50, "name": "Sałatka wieczorna", "size_tag": {"value": "M"}
+}
+_PRODUCT_SNACK_S = {
+    **_PRODUCT_BREAKFAST_M, "id": 60, "name": "Orzechy", "size_tag": {"value": "S"}
+}
 
 _INCLUDES_FULL = {
     "diet_variant_meal_types": [_MEAL_TYPE_BREAKFAST, _MEAL_TYPE_LUNCH],
@@ -57,7 +75,7 @@ _INCLUDES_FULL = {
 _RESULTS_FULL = [
     {"diet_variant_meal_type_id": 1, "simple_product_id": 10, "diet_variant_id": 1},
     {"diet_variant_meal_type_id": 1, "simple_product_id": 11, "diet_variant_id": 2},
-    {"diet_variant_meal_type_id": 2, "simple_product_id": 20, "diet_variant_id": 1},
+    {"diet_variant_meal_type_id": 3, "simple_product_id": 20, "diet_variant_id": 1},
 ]
 
 
@@ -117,6 +135,60 @@ class TestNormalizeMealTypeFiltering:
 
         types = {m["type"] for m in menu.to_compact_dict()["days"][0]["meals"]}
         assert types == {"breakfast", "lunch"}
+
+    def test_all_six_ntfy_meal_types_map_to_canonical_names(self) -> None:
+        includes = {
+            "diet_variant_meal_types": [
+                _MEAL_TYPE_BREAKFAST,
+                _MEAL_TYPE_SECOND_BREAKFAST,
+                _MEAL_TYPE_LUNCH,
+                _MEAL_TYPE_TEA,
+                _MEAL_TYPE_DINNER,
+                _MEAL_TYPE_SNACK,
+            ],
+            "simple_products": [
+                _PRODUCT_BREAKFAST_M,
+                _PRODUCT_SECOND_BREAKFAST_S,
+                _PRODUCT_LUNCH_XL,
+                _PRODUCT_TEA_S,
+                _PRODUCT_DINNER_M,
+                _PRODUCT_SNACK_S,
+            ],
+        }
+        results = [
+            {
+                "diet_variant_meal_type_id": mt["id"],
+                "simple_product_id": p["id"],
+                "diet_variant_id": 1,
+            }
+            for mt, p in [
+                (_MEAL_TYPE_BREAKFAST, _PRODUCT_BREAKFAST_M),
+                (_MEAL_TYPE_SECOND_BREAKFAST, _PRODUCT_SECOND_BREAKFAST_S),
+                (_MEAL_TYPE_LUNCH, _PRODUCT_LUNCH_XL),
+                (_MEAL_TYPE_TEA, _PRODUCT_TEA_S),
+                (_MEAL_TYPE_DINNER, _PRODUCT_DINNER_M),
+                (_MEAL_TYPE_SNACK, _PRODUCT_SNACK_S),
+            ]
+        ]
+
+        menu = normalize_ntfy_week(
+            raw_days=[_make_raw_day(results=results, includes=includes)],
+            provider_id="ntfy",
+            week_start=_WEEK_START,
+            week_end=_WEEK_END,
+            user_id="alan",
+            purchased_meals=[
+                PurchasedMeal(type="breakfast", size="M"),
+                PurchasedMeal(type="second_breakfast", size="S"),
+                PurchasedMeal(type="lunch", size="XL"),
+                PurchasedMeal(type="tea", size="S"),
+                PurchasedMeal(type="dinner", size="M"),
+                PurchasedMeal(type="snack", size="S"),
+            ],
+        )
+
+        meal_types = {m["type"] for m in menu.to_compact_dict()["days"][0]["meals"]}
+        assert meal_types == {"breakfast", "second_breakfast", "lunch", "tea", "dinner", "snack"}
 
     def test_unpurchased_meal_types_excluded(self) -> None:
         menu = normalize_ntfy_week(
@@ -302,7 +374,6 @@ class TestNormalizeErrorCases:
             )
 
     def test_unknown_meal_type_key_skipped(self) -> None:
-        """Results referencing a meal type with an unknown key are ignored."""
         unknown_mt = {"id": 99, "diet_id": 1, "meal_name": {"key": "UNKNOWN", "value": "???"}}
         includes = {
             "diet_variant_meal_types": [unknown_mt],
