@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from meal_orchestrator.domain import DeliveryResult, DiscordMessage, EmailMessage
+from meal_orchestrator.domain import DiscordMessage, EmailMessage
 
 
 class DiscordClient:
-    def notify(self, message: DiscordMessage) -> DeliveryResult:
+    def notify(self, message: DiscordMessage) -> None:
         raise NotImplementedError("real Discord transport is intentionally not implemented yet")
 
 
 class EmailClient:
-    def send(self, message: EmailMessage, idempotency_key: str) -> DeliveryResult:
+    def send(self, message: EmailMessage, idempotency_key: str) -> None:
         raise NotImplementedError("real Resend transport is intentionally not implemented yet")

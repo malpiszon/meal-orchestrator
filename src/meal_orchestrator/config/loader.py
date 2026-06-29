@@ -93,8 +93,16 @@ def _parse_user(raw_user: dict[str, Any]) -> UserConfig:
         provider=str(_field(raw_user, "provider")),
         provider_offering_id=_parse_offering_id(_field(raw_user, "provider_offering_id")),
         email=str(_field(raw_user, "email")),
-        discord_user_id=str(_field(raw_user, "discord_user_id")),
-        discord_webhook_env=str(_field(raw_user, "discord_webhook_env")),
+        discord_user_id=(
+            str(raw_user["discord_user_id"])
+            if raw_user.get("discord_user_id") is not None
+            else None
+        ),
+        discord_webhook_env=(
+            str(raw_user["discord_webhook_env"])
+            if raw_user.get("discord_webhook_env") is not None
+            else None
+        ),
         prompt_file=Path(_field(raw_user, "prompt_file")),
         purchased_meals=[
             PurchasedMeal(type=str(_field(meal, "type")), size=str(_field(meal, "size")))

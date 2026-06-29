@@ -146,13 +146,6 @@ class DiscordMessage:
     content: str
 
 
-@dataclass(frozen=True)
-class DeliveryResult:
-    success: bool
-    provider_message_id: str | None = None
-    detail: str | None = None
-
-
 class WorkflowStatus(StrEnum):
     COMPLETED = "completed"
     MENU_UNAVAILABLE = "menu_unavailable"
