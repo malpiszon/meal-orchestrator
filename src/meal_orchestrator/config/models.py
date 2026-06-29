@@ -48,7 +48,7 @@ class UserConfig:
     provider: str
     provider_offering_id: int | str
     email: str
-    discord_user_id: str
-    discord_webhook_env: str
+    discord_user_id: str | None
+    discord_webhook_env: str | None
     prompt_file: Path
     purchased_meals: list[PurchasedMeal]

@@ -9,7 +9,6 @@ from meal_orchestrator.domain import (
     CanonicalDay,
     CanonicalMeal,
     CanonicalMenu,
-    DeliveryResult,
     DiscordMessage,
     EmailMessage,
     MealVariant,
@@ -75,16 +74,14 @@ class FakeEmailClient:
         self.messages: list[EmailMessage] = []
         self.idempotency_keys: list[str] = []
 
-    def send(self, message: EmailMessage, idempotency_key: str) -> DeliveryResult:
+    def send(self, message: EmailMessage, idempotency_key: str) -> None:
         self.messages.append(message)
         self.idempotency_keys.append(idempotency_key)
-        return DeliveryResult(success=True)
 
 
 class FakeDiscordClient:
     def __init__(self) -> None:
         self.messages: list[DiscordMessage] = []
 
-    def notify(self, message: DiscordMessage) -> DeliveryResult:
+    def notify(self, message: DiscordMessage) -> None:
         self.messages.append(message)
-        return DeliveryResult(success=True)

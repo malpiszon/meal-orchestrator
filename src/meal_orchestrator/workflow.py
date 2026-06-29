@@ -116,19 +116,27 @@ class UserWorkflowExecutor:
             final_token_usage = llm_result.token_usage
 
             if not run_context.skip_email and not run_context.dry_run:
-                self.email_client.send(
-                    EmailMessage(
-                        to=user.email,
-                        from_address=self.app_config.delivery.email_from,
-                        subject=f"Meal plan for {run_context.week_start.isoformat()}",
-                        body=llm_result.text,
-                    ),
-                    idempotency_key=f"{run_context.run_id}:{user.id}:email",
-                )
+                try:
+                    self.email_client.send(
+                        EmailMessage(
+                            to=user.email,
+                            from_address=self.app_config.delivery.email_from,
+                            subject=f"Meal plan for {run_context.week_start.isoformat()}",
+                            body=llm_result.text,
+                        ),
+                        idempotency_key=f"{run_context.run_id}:{user.id}:email",
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "email delivery failed",
+                        exc_info=True,
+                        extra={**log_context, "step": "email", "error": str(exc)},
+                    )
+                    raise
             else:
                 logger.info("email delivery skipped", extra={**log_context, "step": "email"})
 
-            if not run_context.skip_discord and not run_context.dry_run:
+            if not run_context.skip_discord and not run_context.dry_run and user.discord_webhook_env:  # noqa: E501
                 try:
                     self.discord_client.notify(
                         DiscordMessage(
@@ -160,7 +168,7 @@ class UserWorkflowExecutor:
         except MenuUnavailableError as exc:
             logger.info("menu unavailable", extra={**log_context, "step": "provider"})
             final_status = WorkflowStatus.MENU_UNAVAILABLE
-            if not run_context.skip_discord and not run_context.dry_run:
+            if not run_context.skip_discord and not run_context.dry_run and user.discord_webhook_env:  # noqa: E501
                 try:
                     self.discord_client.notify(
                         DiscordMessage(
