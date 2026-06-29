@@ -365,10 +365,13 @@ class TestNormalizeWithRealFixtures:
         # Compare only the first day since only one raw fixture is loaded here.
         assert payload["days"][0] == canonical_fixture["days"][0]
 
-    def test_fixture_both_days_match_canonical(self) -> None:
+    def test_fixture_full_week_matches_canonical(self) -> None:
         raw_days = [
             _load_fixture_raw_day("2026-06-29"),
             _load_fixture_raw_day("2026-06-30"),
+            _load_fixture_raw_day("2026-07-01"),
+            _load_fixture_raw_day("2026-07-02"),
+            _load_fixture_raw_day("2026-07-03"),
         ]
         canonical_fixture = json.loads(
             (_FIXTURE_DIR / "canonical_offer6_week_2026-06-29.json").read_bytes()
@@ -388,7 +391,10 @@ class TestNormalizeWithRealFixtures:
 
         assert menu.to_compact_dict() == canonical_fixture
 
-    @pytest.mark.parametrize("fixture_date", ["2026-06-29", "2026-06-30"])
+    @pytest.mark.parametrize(
+        "fixture_date",
+        ["2026-06-29", "2026-06-30", "2026-07-01", "2026-07-02", "2026-07-03"],
+    )
     def test_fixture_produces_two_meals_per_day(self, fixture_date: str) -> None:
         menu = normalize_ntfy_week(
             raw_days=[_load_fixture_raw_day(fixture_date)],
@@ -407,7 +413,10 @@ class TestNormalizeWithRealFixtures:
         meal_types = {m["type"] for m in day["meals"]}
         assert meal_types == {"breakfast", "lunch"}
 
-    @pytest.mark.parametrize("fixture_date", ["2026-06-29", "2026-06-30"])
+    @pytest.mark.parametrize(
+        "fixture_date",
+        ["2026-06-29", "2026-06-30", "2026-07-01", "2026-07-02", "2026-07-03"],
+    )
     def test_fixture_each_meal_has_three_variants(self, fixture_date: str) -> None:
         menu = normalize_ntfy_week(
             raw_days=[_load_fixture_raw_day(fixture_date)],
