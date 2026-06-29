@@ -125,7 +125,7 @@ class RunOrchestrator:
                     user_id=user.id, status=WorkflowStatus.FAILED, detail=str(exc)
                 )
 
-            if result.status == WorkflowStatus.FAILED:
+            if result.status == WorkflowStatus.FAILED and not options.skip_discord:
                 _send_operational_notification(
                     discord_client=discord_client,
                     webhook_env=self.app_config.delivery.operational_discord_webhook_env,
