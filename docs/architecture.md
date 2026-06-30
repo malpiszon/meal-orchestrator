@@ -210,8 +210,6 @@ Manual runs use the same workflow with optional overrides:
 - `--user <id>` to run a single user.
 - `--provider <id>` to override provider where valid.
 - `--week-start YYYY-MM-DD` to test a specific week.
-- `--skip-email` to avoid sending email.
-- `--skip-discord` to avoid Discord user notifications.
 - `--dry-run` to fetch, normalize, and build prompts without external delivery.
 - `--llm-model <model>` to override the configured model.
 
@@ -377,9 +375,12 @@ users:
 Required environment variables:
 
 - `OPENROUTER_API_KEY`
-- `RESEND_API_KEY`
-- `DISCORD_OPS_WEBHOOK_URL`
-- User Discord webhook variables referenced by config.
+
+Optional environment variables (delivery is skipped when absent):
+
+- `RESEND_API_KEY` — email delivery via Resend; omit to skip email.
+- `DISCORD_OPS_WEBHOOK_URL` — operational failure notifications; omit to skip.
+- User Discord webhook variables referenced by config — omit to skip per-user Discord notifications.
 - Provider API credentials, if required by a provider.
 
 The user Discord webhook may initially be the same webhook for all users. Keeping it configurable per user is still useful because it allows future separation without changing the config model. Each user should also have `discord_user_id` or an equivalent mention identifier so user notifications can mention the recipient directly.
@@ -478,7 +479,7 @@ Shared batches between users should be avoided initially because they make cance
 - Run through CLI.
 - Load `.env` locally.
 - Use cheap LLM model by default.
-- Use `--dry-run` and `--skip-email` for parser and prompt testing.
+- Use `--dry-run` for parser and prompt testing without external delivery.
 
 ### Raspberry Pi / Docker Swarm
 
