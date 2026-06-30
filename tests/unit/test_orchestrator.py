@@ -84,7 +84,7 @@ def test_orchestrator_sends_operational_notification_on_completed(tmp_path) -> N
     assert result[0].status == WorkflowStatus.COMPLETED
     ops_msg = discord.messages[-1]
     assert ops_msg.webhook_env == "DISCORD_OPS_WEBHOOK_URL"
-    assert "completed" in ops_msg.content
+    assert "completed" in ops_msg.description
 
 
 def test_orchestrator_sends_operational_notification_on_failure(tmp_path) -> None:
@@ -106,7 +106,7 @@ def test_orchestrator_sends_operational_notification_on_failure(tmp_path) -> Non
 
     assert result[0].status == WorkflowStatus.FAILED
     assert discord.messages[0].webhook_env == "DISCORD_OPS_WEBHOOK_URL"
-    assert "provider exploded" in discord.messages[0].content
+    assert "provider exploded" in discord.messages[0].description
 
 
 def test_orchestrator_dry_run_suppresses_ops_notification(tmp_path) -> None:

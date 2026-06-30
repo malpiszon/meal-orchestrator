@@ -17,7 +17,9 @@ _WEBHOOK_URL = "https://discord.com/api/webhooks/123/abc"
 def _make_message() -> DiscordMessage:
     return DiscordMessage(
         webhook_env=_WEBHOOK_ENV,
-        content="Hej <@123>, Twoja dieta została zaplanowana.",
+        title="Meal plan ready",
+        description="Hey <@123>, your meal plan for 2026-07-07–2026-07-11 is ready.",
+        color=0x2ECC71,
     )
 
 
@@ -48,7 +50,7 @@ class TestDiscordWebhookClientNotify:
 
         assert captured["url"] == _WEBHOOK_URL
 
-    def test_sends_content_in_body(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_sends_embed_in_body(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv(_WEBHOOK_ENV, _WEBHOOK_URL)
         captured = {}
 
@@ -60,11 +62,16 @@ class TestDiscordWebhookClientNotify:
         with patch("urllib.request.urlopen", side_effect=side_effect):
             DiscordWebhookClient().notify(msg)
 
-        assert captured["body"]["content"] == msg.content
+        embed = captured["body"]["embeds"][0]
+        assert embed["title"] == msg.title
+        assert embed["description"] == msg.description
+        assert embed["color"] == msg.color
 
     def test_raises_key_error_when_env_not_set(self) -> None:
         client = DiscordWebhookClient()
-        msg = DiscordMessage(webhook_env="MISSING_DISCORD_ENV", content="test")
+        msg = DiscordMessage(
+            webhook_env="MISSING_DISCORD_ENV", title="T", description="D", color=0
+        )
         with pytest.raises(KeyError):
             client.notify(msg)
 

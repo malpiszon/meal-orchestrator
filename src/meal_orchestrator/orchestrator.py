@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 from meal_orchestrator.artifacts import ArtifactStore
 from meal_orchestrator.config import AppConfig, UserConfig
 from meal_orchestrator.delivery import DiscordClient, EmailClient, build_discord_client
+from meal_orchestrator.delivery.discord import COLOR_ERROR, COLOR_SUCCESS, COLOR_WARNING
 from meal_orchestrator.delivery.email import ResendEmailClient
 from meal_orchestrator.domain import (
     DiscordMessage,
@@ -154,13 +155,30 @@ class RunOrchestrator:
         return selected
 
 
-def _ops_message(user_id: str, run_id: str, result: WorkflowResult) -> str:
+def _build_ops_message(
+    webhook_env: str, user_id: str, run_id: str, result: WorkflowResult
+) -> DiscordMessage:
     if result.status == WorkflowStatus.COMPLETED:
-        return f"Workflow completed for user {user_id} (run {run_id})."
+        return DiscordMessage(
+            webhook_env=webhook_env,
+            title="Workflow completed",
+            description=f"Workflow completed for user {user_id} (run {run_id}).",
+            color=COLOR_SUCCESS,
+        )
     if result.status == WorkflowStatus.MENU_UNAVAILABLE:
         detail = result.detail or "unknown reason"
-        return f"Menu unavailable for user {user_id} (run {run_id}): {detail}"
-    return f"Workflow failed for user {user_id} (run {run_id}): {result.detail or 'unknown error'}"
+        return DiscordMessage(
+            webhook_env=webhook_env,
+            title="Menu unavailable",
+            description=f"Menu unavailable for user {user_id} (run {run_id}): {detail}",
+            color=COLOR_WARNING,
+        )
+    return DiscordMessage(
+        webhook_env=webhook_env,
+        title="Workflow failed",
+        description=f"Workflow failed for user {user_id} (run {run_id}): {result.detail or 'unknown error'}",  # noqa: E501
+        color=COLOR_ERROR,
+    )
 
 
 def _send_operational_notification(
@@ -172,12 +190,7 @@ def _send_operational_notification(
     result: WorkflowResult,
 ) -> None:
     try:
-        discord_client.notify(
-            DiscordMessage(
-                webhook_env=webhook_env,
-                content=_ops_message(user_id, run_id, result),
-            )
-        )
+        discord_client.notify(_build_ops_message(webhook_env, user_id, run_id, result))
     except Exception:
         logger.warning(
             "operational discord notification failed",

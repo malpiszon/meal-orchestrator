@@ -8,6 +8,7 @@ from pathlib import Path
 from meal_orchestrator.artifacts import ArtifactStore
 from meal_orchestrator.config import AppConfig, UserConfig
 from meal_orchestrator.delivery import DiscordClient, EmailClient
+from meal_orchestrator.delivery.discord import COLOR_SUCCESS, COLOR_WARNING
 from meal_orchestrator.domain import (
     CanonicalMenu,
     DiscordMessage,
@@ -149,10 +150,15 @@ class UserWorkflowExecutor:
                     self.discord_client.notify(
                         DiscordMessage(
                             webhook_env=user.discord_webhook_env,
-                            content=(
-                                f"Hej <@{user.discord_user_id}>, "
-                                "Twoja dieta została zaplanowana."
+                            title="Meal plan ready",
+                            description=(
+                                f"Hey <@{user.discord_user_id}>, "
+                                f"your meal plan for "
+                                f"{run_context.week_start.isoformat()}–"
+                                f"{run_context.week_end.isoformat()} "
+                                "is ready."
                             ),
+                            color=COLOR_SUCCESS,
                         )
                     )
                     logger.info(
@@ -197,10 +203,15 @@ class UserWorkflowExecutor:
                     self.discord_client.notify(
                         DiscordMessage(
                             webhook_env=user.discord_webhook_env,
-                            content=(
-                                f"Hej <@{user.discord_user_id}>, "
-                                "menu na wybrany tydzień nie jest jeszcze dostępne."
+                            title="Menu not available yet",
+                            description=(
+                                f"Hey <@{user.discord_user_id}>, "
+                                f"the menu for "
+                                f"{run_context.week_start.isoformat()}–"
+                                f"{run_context.week_end.isoformat()} "
+                                "is not available yet."
                             ),
+                            color=COLOR_WARNING,
                         )
                     )
                 except Exception as exc_discord:

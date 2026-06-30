@@ -5,12 +5,17 @@ import logging
 import os
 import urllib.error
 import urllib.request
+from datetime import UTC, datetime
 
-from meal_orchestrator import USER_AGENT
+from meal_orchestrator import APP_NAME, USER_AGENT
 from meal_orchestrator.domain import DiscordMessage
 from meal_orchestrator.retries import is_transient_http_error, with_retries
 
 logger = logging.getLogger(__name__)
+
+COLOR_SUCCESS = 0x2ECC71
+COLOR_WARNING = 0xF39C12
+COLOR_ERROR = 0xE74C3C
 
 _BASE_DELAY = 1.0
 _BACKOFF_FACTOR = 2.0
@@ -28,7 +33,19 @@ class DiscordWebhookClient:
 
     def notify(self, message: DiscordMessage) -> None:
         webhook_url = os.environ[message.webhook_env]
-        body = json.dumps({"content": message.content}).encode("utf-8")
+        payload = {
+            "username": APP_NAME,
+            "embeds": [
+                {
+                    "title": message.title,
+                    "description": message.description,
+                    "color": message.color,
+                    "footer": {"text": APP_NAME},
+                    "timestamp": datetime.now(UTC).isoformat(),
+                }
+            ],
+        }
+        body = json.dumps(payload).encode("utf-8")
         headers = {
             "Content-Type": "application/json",
             "User-Agent": USER_AGENT,
