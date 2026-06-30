@@ -7,6 +7,7 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from meal_orchestrator import APP_NAME
 from meal_orchestrator.domain import LlmRequest, LlmResult, PromptPayload
 from meal_orchestrator.retries import with_retries
 
@@ -56,6 +57,8 @@ class OpenRouterClient:
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/malpiszon/meal-orchestrator",
+            "X-OpenRouter-Title": APP_NAME,
         }
 
         def _call() -> dict[str, Any]:
