@@ -230,6 +230,37 @@ class TestNormalizeSizeFiltering:
                 purchased_meals=[PurchasedMeal(type="breakfast", size="XXL")],
             )
 
+    def test_typo_variant_merged_with_correct_variant(self) -> None:
+        # Simulates the provider data-quality issue where the same dish appears with
+        # a diacritic typo in one size's name. The two entries should be merged into
+        # a single accent-folded group so that all size variants are considered together
+        # and the correct size is found without duplication or failure.
+        product_xl = {**_PRODUCT_LUNCH_XL}  # name "Kurczak z ryżem", size XL
+        product_l_typo = {
+            **_PRODUCT_LUNCH_XL, "id": 21, "name": "Kurczak z ryzem", "size_tag": {"value": "L"}
+        }
+        includes = {
+            "diet_variant_meal_types": [_MEAL_TYPE_LUNCH],
+            "simple_products": [product_xl, product_l_typo],
+        }
+        results = [
+            {"diet_variant_meal_type_id": 3, "simple_product_id": 20, "diet_variant_id": 1},
+            {"diet_variant_meal_type_id": 3, "simple_product_id": 21, "diet_variant_id": 2},
+        ]
+
+        menu = normalize_ntfy_week(
+            raw_days=[_make_raw_day(results=results, includes=includes)],
+            provider_id="ntfy",
+            week_start=_WEEK_START,
+            week_end=_WEEK_END,
+            user_id="alan",
+            purchased_meals=[PurchasedMeal(type="lunch", size="XL")],
+        )
+
+        variants = menu.to_compact_dict()["days"][0]["meals"][0]["variants"]
+        assert len(variants) == 1
+        assert variants[0]["name"] == "Kurczak z ryżem"
+
 
 class TestNormalizeVariants:
     def test_all_dish_variants_for_meal_type_included(self) -> None:

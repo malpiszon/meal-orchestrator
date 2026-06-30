@@ -1,12 +1,24 @@
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Any, Protocol
 
 from meal_orchestrator.domain import ProviderMenuRequest, ProviderResult
 
 
 class MenuUnavailableError(RuntimeError):
     pass
+
+
+class ProviderNormalizationError(Exception):
+    """Raised when raw provider data cannot be normalized into the canonical schema.
+
+    Carries raw_response so callers can persist it for debugging even when
+    normalization fails before a ProviderResult can be returned.
+    """
+
+    def __init__(self, message: str, raw_response: Any = None) -> None:
+        super().__init__(message)
+        self.raw_response = raw_response
 
 
 class ProviderAdapter(Protocol):

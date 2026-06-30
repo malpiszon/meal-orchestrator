@@ -21,7 +21,11 @@ from meal_orchestrator.domain import (
 )
 from meal_orchestrator.llm import OpenRouterClient
 from meal_orchestrator.prompt_builder import build_prompt_payload
-from meal_orchestrator.providers import MenuUnavailableError, ProviderAdapter
+from meal_orchestrator.providers import (
+    MenuUnavailableError,
+    ProviderAdapter,
+    ProviderNormalizationError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +173,21 @@ class UserWorkflowExecutor:
             logger.info("user workflow completed", extra={**log_context, "step": "complete"})
             final_status = WorkflowStatus.COMPLETED
             return WorkflowResult(user_id=user.id, status=WorkflowStatus.COMPLETED)
+        except ProviderNormalizationError as exc:
+            if exc.raw_response is not None:
+                artifacts.save_provider_raw(exc.raw_response)
+            final_error = str(exc)
+            final_status = WorkflowStatus.FAILED
+            logger.error(
+                "provider normalization failed",
+                exc_info=True,
+                extra={**log_context, "step": "provider", "error": final_error},
+            )
+            return WorkflowResult(
+                user_id=user.id,
+                status=WorkflowStatus.FAILED,
+                detail=final_error,
+            )
         except MenuUnavailableError as exc:
             final_error = str(exc)
             logger.info("menu unavailable", extra={**log_context, "step": "provider"})
@@ -193,7 +212,7 @@ class UserWorkflowExecutor:
             return WorkflowResult(
                 user_id=user.id,
                 status=WorkflowStatus.MENU_UNAVAILABLE,
-                detail=str(exc),
+                detail=final_error,
             )
         except Exception as exc:
             final_error = str(exc)
