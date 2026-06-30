@@ -7,8 +7,7 @@ from pathlib import Path
 
 from meal_orchestrator.artifacts import ArtifactStore
 from meal_orchestrator.config import AppConfig, UserConfig
-from meal_orchestrator.delivery import DiscordClient
-from meal_orchestrator.delivery.email import ResendEmailClient
+from meal_orchestrator.delivery import DiscordClient, EmailClient
 from meal_orchestrator.domain import (
     CanonicalMenu,
     DiscordMessage,
@@ -34,7 +33,7 @@ class UserWorkflowExecutor:
         app_config: AppConfig,
         provider: ProviderAdapter,
         llm_client: OpenRouterClient,
-        email_client: ResendEmailClient | None,
+        email_client: EmailClient | None,
         discord_client: DiscordClient,
         project_root: Path,
         artifact_store: ArtifactStore | None = None,

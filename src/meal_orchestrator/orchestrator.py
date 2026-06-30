@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 from meal_orchestrator.artifacts import ArtifactStore
 from meal_orchestrator.config import AppConfig, UserConfig
-from meal_orchestrator.delivery import DiscordClient
+from meal_orchestrator.delivery import DiscordClient, EmailClient
 from meal_orchestrator.delivery.email import ResendEmailClient
 from meal_orchestrator.domain import (
     DiscordMessage,
@@ -46,7 +46,7 @@ class RunOrchestrator:
         project_root: Path,
         provider_factory: Callable[[str], ProviderAdapter] | None = None,
         llm_client: OpenRouterClient | None = None,
-        email_client: ResendEmailClient | None = None,
+        email_client: EmailClient | None = None,
         discord_client: DiscordClient | None = None,
     ) -> None:
         self.app_config = app_config
