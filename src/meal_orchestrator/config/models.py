@@ -22,7 +22,7 @@ class LlmConfig:
 @dataclass(frozen=True)
 class DeliveryConfig:
     email_from: str
-    operational_discord_webhook_env: str
+    operational_discord_webhook_env: str | None
 
 
 @dataclass(frozen=True)

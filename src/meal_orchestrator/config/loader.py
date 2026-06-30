@@ -33,7 +33,7 @@ def load_app_config(path: Path) -> AppConfig:
         default_provider=_required(data, "providers", "default"),
         delivery=DeliveryConfig(
             email_from=_required(data, "delivery", "email_from"),
-            operational_discord_webhook_env=_required(
+            operational_discord_webhook_env=_optional(
                 data, "delivery", "operational_discord_webhook_env"
             ),
         ),
@@ -123,10 +123,18 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 
 
 def _required(data: dict[str, Any], section: str, key: str) -> Any:
-    value = data.get(section, {}).get(key)
+    section_data = data.get(section)
+    value = section_data.get(key) if isinstance(section_data, dict) else None
     if value is None:
         raise ConfigError(f"missing required configuration value: {section}.{key}")
     return value
+
+
+def _optional(data: dict[str, Any], section: str, key: str) -> Any:
+    section_data = data.get(section)
+    if not isinstance(section_data, dict):
+        return None
+    return section_data.get(key)
 
 
 def _field(data: dict[str, Any], key: str) -> Any:

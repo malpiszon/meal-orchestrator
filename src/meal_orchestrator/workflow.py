@@ -37,7 +37,7 @@ class UserWorkflowExecutor:
         app_config: AppConfig,
         provider: ProviderAdapter,
         llm_client: OpenRouterClient,
-        email_client: EmailClient,
+        email_client: EmailClient | None,
         discord_client: DiscordClient,
         project_root: Path,
         artifact_store: ArtifactStore | None = None,
@@ -120,7 +120,7 @@ class UserWorkflowExecutor:
             final_model = llm_result.model
             final_token_usage = llm_result.token_usage
 
-            if not run_context.skip_email and not run_context.dry_run:
+            if not run_context.dry_run and self.email_client is not None:
                 try:
                     self.email_client.send(
                         EmailMessage(
@@ -144,7 +144,7 @@ class UserWorkflowExecutor:
             else:
                 logger.info("email delivery skipped", extra={**log_context, "step": "email"})
 
-            if not run_context.skip_discord and not run_context.dry_run and user.discord_webhook_env:  # noqa: E501
+            if not run_context.dry_run and user.discord_webhook_env:
                 try:
                     self.discord_client.notify(
                         DiscordMessage(
@@ -192,7 +192,7 @@ class UserWorkflowExecutor:
             final_error = str(exc)
             logger.info("menu unavailable", extra={**log_context, "step": "provider"})
             final_status = WorkflowStatus.MENU_UNAVAILABLE
-            if not run_context.skip_discord and not run_context.dry_run and user.discord_webhook_env:  # noqa: E501
+            if not run_context.dry_run and user.discord_webhook_env:
                 try:
                     self.discord_client.notify(
                         DiscordMessage(

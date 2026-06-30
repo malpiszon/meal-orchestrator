@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from meal_orchestrator.delivery.email import ResendEmailClient
-from meal_orchestrator.domain import DiscordMessage
+from typing import Protocol
 
-EmailClient = ResendEmailClient
+from meal_orchestrator.domain import DiscordMessage, EmailMessage
+
+
+class EmailClient(Protocol):
+    def send(self, message: EmailMessage, idempotency_key: str) -> None: ...
 
 
 class DiscordClient:

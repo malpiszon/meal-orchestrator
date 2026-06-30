@@ -18,8 +18,6 @@ class RunContext:
     week_start: date
     week_end: date
     dry_run: bool
-    skip_email: bool
-    skip_discord: bool
     provider_id: str
     llm_model: str | None = None
 
