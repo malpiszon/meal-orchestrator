@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections import defaultdict
 from datetime import date
 from typing import Any
@@ -71,8 +72,10 @@ def _normalize_day(
     meal_type_map = _build_meal_type_map(includes)
     product_map = _build_product_map(includes)
 
-    # Group products by (canonical_type, dish_name).
-    # Each entry holds all size variants of a dish for one meal slot.
+    # Group products by (canonical_type, accent-folded dish name).
+    # Folding merges size-variant entries whose names differ only in diacritics
+    # (a known provider data-quality issue) into a single group so that all
+    # size variants of the same logical dish are considered together.
     groups: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(lambda: defaultdict(list))
 
     for row in results:
@@ -96,7 +99,7 @@ def _normalize_day(
             raise ValueError(
                 f"ntfy: simple_product_id={prod_id} has no name"
             )
-        groups[canonical_type][name].append(product)
+        groups[canonical_type][_accent_fold(name)].append(product)
 
     # For each purchased meal, pick the matching size variant of every dish.
     canonical_meals: list[CanonicalMeal] = []
@@ -135,6 +138,20 @@ def _build_product_map(includes: dict[str, Any]) -> dict[int, dict[str, Any]]:
     return {p["id"]: p for p in (includes.get("simple_products") or []) if "id" in p}
 
 
+def _accent_fold(s: str) -> str:
+    """Casefold and strip combining diacritical marks for dish-name grouping.
+
+    Merges names that differ only in accents/diacritics (e.g. a provider typo
+    that writes 'niedzwiedzim' instead of 'niedźwiedzim') into the same group key
+    so that all size variants of the same logical dish are considered together.
+    """
+    return "".join(
+        c
+        for c in unicodedata.normalize("NFD", s.casefold())
+        if unicodedata.category(c) != "Mn"
+    )
+
+
 def _pick_size(
     dish_name: str,
     size_variants: list[dict[str, Any]],
@@ -143,6 +160,9 @@ def _pick_size(
     """Return the variant matching target_size exactly.
 
     Raises ValueError if the purchased size is not available for this dish.
+    Because dish names are accent-folded before grouping, all size variants of
+    the same logical dish (including those with minor name typos) are in the
+    same group, so a missing size here indicates a genuine data gap.
     """
     available: list[str] = []
     for variant in size_variants:

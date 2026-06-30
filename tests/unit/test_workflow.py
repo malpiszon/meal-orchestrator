@@ -13,6 +13,7 @@ from meal_orchestrator.domain import (
     RunContext,
     WorkflowStatus,
 )
+from meal_orchestrator.providers import ProviderNormalizationError
 from meal_orchestrator.workflow import UserWorkflowExecutor
 from tests.unit.helpers import (
     FakeDiscordClient,
@@ -34,6 +35,16 @@ class FakeProvider:
         self.requests.append(request)
         return ProviderResult(
             menu=canonical_menu(complete=self.complete), raw_response={"raw": True}
+        )
+
+
+class FakeProviderWithNormalizationError:
+    provider_id = "example_provider"
+
+    def get_canonical_week_menu(self, request: ProviderMenuRequest):
+        raise ProviderNormalizationError(
+            "dish 'X' has no size 'XL'; available: ['L']",
+            raw_response={"raw": "data from api"},
         )
 
 
@@ -185,6 +196,53 @@ def test_metadata_written_on_failed_run(tmp_path: Path) -> None:
     assert (run_dir / "canonical_menu.json").exists()
     metadata = json.loads((run_dir / "metadata.json").read_text())
     assert metadata["status"] == "menu_unavailable"
+
+
+def test_normalization_error_returns_failed_without_discord(tmp_path) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    llm = FakeLlmClient()
+    email = FakeEmailClient()
+    discord = FakeDiscordClient()
+
+    result = _executor(
+        tmp_path, FakeProviderWithNormalizationError(), llm, email, discord
+    ).execute(
+        user_config(PathLikePrompt(prompt_file, tmp_path)),
+        _context(dry_run=False),
+    )
+
+    assert result.status == WorkflowStatus.FAILED
+    assert "has no size" in result.detail
+    assert llm.requests == []
+    assert email.messages == []
+    assert discord.messages == []
+
+
+def test_normalization_error_saves_provider_raw_artifact(tmp_path: Path) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    artifacts_dir = tmp_path / "artifacts"
+    store = ArtifactStore(
+        ArtifactConfig(path=artifacts_dir, retention_days=14, max_runs_per_user=10)
+    )
+
+    executor = _executor(
+        tmp_path,
+        FakeProviderWithNormalizationError(),
+        FakeLlmClient(),
+        FakeEmailClient(),
+        FakeDiscordClient(),
+        store,
+    )
+    executor.execute(user_config(PathLikePrompt(prompt_file, tmp_path)), _context(dry_run=False))
+
+    run_dir = artifacts_dir / "alan" / "run-1"
+    assert (run_dir / "provider_raw.json").exists()
+    raw = json.loads((run_dir / "provider_raw.json").read_text())
+    assert raw == {"raw": "data from api"}
+    metadata = json.loads((run_dir / "metadata.json").read_text())
+    assert metadata["status"] == "failed"
 
 
 def _executor(tmp_path, provider, llm, email, discord, artifact_store=None) -> UserWorkflowExecutor:
