@@ -196,6 +196,36 @@ def test_metadata_written_on_failed_run(tmp_path: Path) -> None:
     assert metadata["status"] == "menu_unavailable"
 
 
+def test_discord_skipped_when_discord_user_id_is_none(tmp_path) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    discord = FakeDiscordClient()
+    user = user_config(PathLikePrompt(prompt_file, tmp_path))
+    user_without_id = _user_without_discord_user_id(user)
+
+    executor = _executor(tmp_path, FakeProvider(), FakeLlmClient(), FakeEmailClient(), discord)
+    result = executor.execute(user_without_id, _context(dry_run=False))
+
+    assert result.status == WorkflowStatus.COMPLETED
+    assert discord.messages == []
+
+
+def test_discord_skipped_on_menu_unavailable_when_discord_user_id_is_none(tmp_path) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    discord = FakeDiscordClient()
+    user = user_config(PathLikePrompt(prompt_file, tmp_path))
+    user_without_id = _user_without_discord_user_id(user)
+
+    executor = _executor(
+        tmp_path, FakeProvider(complete=False), FakeLlmClient(), FakeEmailClient(), discord
+    )
+    result = executor.execute(user_without_id, _context(dry_run=False))
+
+    assert result.status == WorkflowStatus.MENU_UNAVAILABLE
+    assert discord.messages == []
+
+
 def test_normalization_error_returns_failed_without_discord(tmp_path) -> None:
     prompt_file = tmp_path / "prompt.md"
     prompt_file.write_text("Choose meals.", encoding="utf-8")
@@ -267,3 +297,8 @@ def _context(*, dry_run: bool) -> RunContext:
 
 def PathLikePrompt(prompt_file, project_root):
     return prompt_file.relative_to(project_root)
+
+
+def _user_without_discord_user_id(user):
+    from dataclasses import replace
+    return replace(user, discord_user_id=None)

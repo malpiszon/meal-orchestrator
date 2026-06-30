@@ -8,6 +8,7 @@ from pathlib import Path
 from meal_orchestrator.artifacts import ArtifactStore
 from meal_orchestrator.config import AppConfig, UserConfig
 from meal_orchestrator.delivery import DiscordClient, EmailClient
+from meal_orchestrator.delivery.discord import COLOR_SUCCESS, COLOR_WARNING
 from meal_orchestrator.domain import (
     CanonicalMenu,
     DiscordMessage,
@@ -144,15 +145,20 @@ class UserWorkflowExecutor:
             else:
                 logger.info("email delivery skipped", extra={**log_context, "step": "email"})
 
-            if not run_context.dry_run and user.discord_webhook_env:
+            if _discord_enabled(run_context, user):
                 try:
                     self.discord_client.notify(
                         DiscordMessage(
                             webhook_env=user.discord_webhook_env,
-                            content=(
-                                f"Hej <@{user.discord_user_id}>, "
-                                "Twoja dieta została zaplanowana."
+                            title="Meal plan ready",
+                            description=(
+                                f"Hey <@{user.discord_user_id}>, "
+                                f"your meal plan for "
+                                f"{run_context.week_start.isoformat()}–"
+                                f"{run_context.week_end.isoformat()} "
+                                "is ready."
                             ),
+                            color=COLOR_SUCCESS,
                         )
                     )
                     logger.info(
@@ -192,15 +198,20 @@ class UserWorkflowExecutor:
             final_error = str(exc)
             logger.info("menu unavailable", extra={**log_context, "step": "provider"})
             final_status = WorkflowStatus.MENU_UNAVAILABLE
-            if not run_context.dry_run and user.discord_webhook_env:
+            if _discord_enabled(run_context, user):
                 try:
                     self.discord_client.notify(
                         DiscordMessage(
                             webhook_env=user.discord_webhook_env,
-                            content=(
-                                f"Hej <@{user.discord_user_id}>, "
-                                "menu na wybrany tydzień nie jest jeszcze dostępne."
+                            title="Menu not available yet",
+                            description=(
+                                f"Hey <@{user.discord_user_id}>, "
+                                f"the menu for "
+                                f"{run_context.week_start.isoformat()}–"
+                                f"{run_context.week_end.isoformat()} "
+                                "is not available yet."
                             ),
+                            color=COLOR_WARNING,
                         )
                     )
                 except Exception as exc_discord:
@@ -242,6 +253,10 @@ class UserWorkflowExecutor:
             if final_error is not None:
                 metadata["error"] = final_error
             artifacts.save_metadata(metadata)
+
+
+def _discord_enabled(run_context: RunContext, user: UserConfig) -> bool:
+    return not run_context.dry_run and bool(user.discord_webhook_env) and bool(user.discord_user_id)
 
 
 def _json_size(menu) -> int:

@@ -141,7 +141,9 @@ class EmailMessage:
 @dataclass(frozen=True)
 class DiscordMessage:
     webhook_env: str
-    content: str
+    title: str
+    description: str
+    color: int
 
 
 class WorkflowStatus(StrEnum):

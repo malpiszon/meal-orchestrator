@@ -64,7 +64,30 @@ def test_orchestrator_uses_provider_override(tmp_path) -> None:
     assert provider.requests[0].provider_offering_id == 123
 
 
-def test_orchestrator_sends_operational_notification_on_unhandled_failure(tmp_path) -> None:
+def test_orchestrator_sends_operational_notification_on_completed(tmp_path) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    discord = FakeDiscordClient()
+
+    orchestrator = RunOrchestrator(
+        app_config=app_config(),
+        users=[user_config(prompt_file.relative_to(tmp_path))],
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=FakeLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=discord,
+    )
+
+    result = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert result[0].status == WorkflowStatus.COMPLETED
+    ops_msg = discord.messages[-1]
+    assert ops_msg.webhook_env == "DISCORD_OPS_WEBHOOK_URL"
+    assert "completed" in ops_msg.description
+
+
+def test_orchestrator_sends_operational_notification_on_failure(tmp_path) -> None:
     prompt_file = tmp_path / "prompt.md"
     prompt_file.write_text("Choose meals.", encoding="utf-8")
     discord = FakeDiscordClient()
@@ -83,7 +106,7 @@ def test_orchestrator_sends_operational_notification_on_unhandled_failure(tmp_pa
 
     assert result[0].status == WorkflowStatus.FAILED
     assert discord.messages[0].webhook_env == "DISCORD_OPS_WEBHOOK_URL"
-    assert "provider exploded" in discord.messages[0].content
+    assert "provider exploded" in discord.messages[0].description
 
 
 def test_orchestrator_dry_run_suppresses_ops_notification(tmp_path) -> None:
