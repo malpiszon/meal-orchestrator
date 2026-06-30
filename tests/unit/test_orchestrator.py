@@ -57,7 +57,6 @@ def test_orchestrator_uses_provider_override(tmp_path) -> None:
             provider_override="override_provider",
             week_start=date(2026, 6, 1),
             dry_run=True,
-            skip_discord=True,
         )
     )
 
@@ -80,7 +79,7 @@ def test_orchestrator_sends_operational_notification_on_unhandled_failure(tmp_pa
         discord_client=discord,
     )
 
-    result = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=True))
+    result = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
 
     assert result[0].status == WorkflowStatus.FAILED
     assert discord.messages[0].webhook_env == "DISCORD_OPS_WEBHOOK_URL"

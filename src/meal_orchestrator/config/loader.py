@@ -33,8 +33,8 @@ def load_app_config(path: Path) -> AppConfig:
         default_provider=_required(data, "providers", "default"),
         delivery=DeliveryConfig(
             email_from=_required(data, "delivery", "email_from"),
-            operational_discord_webhook_env=_required(
-                data, "delivery", "operational_discord_webhook_env"
+            operational_discord_webhook_env=data.get("delivery", {}).get(
+                "operational_discord_webhook_env"
             ),
         ),
         artifacts=_parse_artifacts(data),

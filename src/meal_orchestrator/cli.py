@@ -16,8 +16,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--user", dest="user_id")
     parser.add_argument("--provider", dest="provider_override")
     parser.add_argument("--week-start", type=date.fromisoformat)
-    parser.add_argument("--skip-email", action="store_true")
-    parser.add_argument("--skip-discord", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--llm-model")
     parser.add_argument("--log-level", default="INFO")
@@ -41,8 +39,6 @@ def main(argv: list[str] | None = None) -> int:
             provider_override=args.provider_override,
             week_start=args.week_start,
             dry_run=args.dry_run,
-            skip_email=args.skip_email,
-            skip_discord=args.skip_discord,
             llm_model=args.llm_model,
         )
     )

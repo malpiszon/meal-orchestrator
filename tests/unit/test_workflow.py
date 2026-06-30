@@ -84,20 +84,18 @@ def test_non_dry_run_calls_llm_and_email(tmp_path) -> None:
     assert email.idempotency_keys == ["run-1:alan:email"]
 
 
-def test_skip_email_only_suppresses_email(tmp_path) -> None:
+def test_no_email_client_skips_email(tmp_path) -> None:
     prompt_file = tmp_path / "prompt.md"
     prompt_file.write_text("Choose meals.", encoding="utf-8")
     llm = FakeLlmClient()
-    email = FakeEmailClient()
     discord = FakeDiscordClient()
 
-    _executor(tmp_path, FakeProvider(), llm, email, discord).execute(
+    _executor(tmp_path, FakeProvider(), llm, None, discord).execute(
         user_config(PathLikePrompt(prompt_file, tmp_path)),
-        _context(dry_run=False, skip_email=True),
+        _context(dry_run=False),
     )
 
     assert len(llm.requests) == 1
-    assert email.messages == []
     assert len(discord.messages) == 1
 
 
@@ -199,14 +197,12 @@ def _executor(tmp_path, provider, llm, email, discord, artifact_store=None) -> U
     )
 
 
-def _context(*, dry_run: bool, skip_email: bool = False) -> RunContext:
+def _context(*, dry_run: bool) -> RunContext:
     return RunContext(
         run_id="run-1",
         week_start=date(2026, 6, 1),
         week_end=date(2026, 6, 5),
         dry_run=dry_run,
-        skip_email=skip_email,
-        skip_discord=False,
         provider_id="example_provider",
     )
 

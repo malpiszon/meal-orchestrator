@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -10,7 +11,8 @@ from zoneinfo import ZoneInfo
 
 from meal_orchestrator.artifacts import ArtifactStore
 from meal_orchestrator.config import AppConfig, UserConfig
-from meal_orchestrator.delivery import DiscordClient, EmailClient
+from meal_orchestrator.delivery import DiscordClient
+from meal_orchestrator.delivery.email import ResendEmailClient
 from meal_orchestrator.domain import (
     DiscordMessage,
     RunContext,
@@ -32,8 +34,6 @@ class RunOptions:
     provider_override: str | None = None
     week_start: date | None = None
     dry_run: bool = False
-    skip_email: bool = False
-    skip_discord: bool = False
     llm_model: str | None = None
 
 
@@ -46,7 +46,7 @@ class RunOrchestrator:
         project_root: Path,
         provider_factory: Callable[[str], ProviderAdapter] | None = None,
         llm_client: OpenRouterClient | None = None,
-        email_client: EmailClient | None = None,
+        email_client: ResendEmailClient | None = None,
         discord_client: DiscordClient | None = None,
     ) -> None:
         self.app_config = app_config
@@ -72,7 +72,10 @@ class RunOrchestrator:
         )
 
         discord_client = self.discord_client_override or DiscordClient()
-        email_client = self.email_client_override or EmailClient()
+        if self.email_client_override is not None:
+            email_client = self.email_client_override
+        else:
+            email_client = ResendEmailClient() if os.environ.get("RESEND_API_KEY") else None
         llm_client = self.llm_client_override or OpenRouterClient()
         provider_factory = self.provider_factory_override or build_provider_adapter
         artifact_store = ArtifactStore(self.app_config.artifacts)
@@ -104,8 +107,6 @@ class RunOrchestrator:
                         week_start=week_start,
                         week_end=week_end,
                         dry_run=options.dry_run,
-                        skip_email=options.skip_email,
-                        skip_discord=options.skip_discord,
                         provider_id=provider_id,
                         llm_model=options.llm_model,
                     ),
@@ -125,10 +126,11 @@ class RunOrchestrator:
                     user_id=user.id, status=WorkflowStatus.FAILED, detail=str(exc)
                 )
 
-            if result.status == WorkflowStatus.FAILED and not options.skip_discord:
+            ops_webhook = self.app_config.delivery.operational_discord_webhook_env
+            if result.status == WorkflowStatus.FAILED and not options.dry_run and ops_webhook:
                 _send_operational_notification(
                     discord_client=discord_client,
-                    webhook_env=self.app_config.delivery.operational_discord_webhook_env,
+                    webhook_env=ops_webhook,
                     user_id=user.id,
                     run_id=run_id,
                     detail=result.detail or "unknown error",
