@@ -144,7 +144,7 @@ class UserWorkflowExecutor:
             else:
                 logger.info("email delivery skipped", extra={**log_context, "step": "email"})
 
-            if not run_context.dry_run and user.discord_webhook_env:
+            if _discord_enabled(run_context, user):
                 try:
                     self.discord_client.notify(
                         DiscordMessage(
@@ -192,7 +192,7 @@ class UserWorkflowExecutor:
             final_error = str(exc)
             logger.info("menu unavailable", extra={**log_context, "step": "provider"})
             final_status = WorkflowStatus.MENU_UNAVAILABLE
-            if not run_context.dry_run and user.discord_webhook_env:
+            if _discord_enabled(run_context, user):
                 try:
                     self.discord_client.notify(
                         DiscordMessage(
@@ -242,6 +242,10 @@ class UserWorkflowExecutor:
             if final_error is not None:
                 metadata["error"] = final_error
             artifacts.save_metadata(metadata)
+
+
+def _discord_enabled(run_context: RunContext, user: UserConfig) -> bool:
+    return not run_context.dry_run and bool(user.discord_webhook_env) and bool(user.discord_user_id)
 
 
 def _json_size(menu) -> int:

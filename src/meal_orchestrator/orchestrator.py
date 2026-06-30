@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 from meal_orchestrator.artifacts import ArtifactStore
 from meal_orchestrator.config import AppConfig, UserConfig
-from meal_orchestrator.delivery import DiscordClient, EmailClient
+from meal_orchestrator.delivery import DiscordClient, EmailClient, build_discord_client
 from meal_orchestrator.delivery.email import ResendEmailClient
 from meal_orchestrator.domain import (
     DiscordMessage,
@@ -71,7 +71,7 @@ class RunOrchestrator:
             extra={"run_id": run_id, "week_start": week_start.isoformat(), "step": "start"},
         )
 
-        discord_client = self.discord_client_override or DiscordClient()
+        discord_client = self.discord_client_override or build_discord_client()
         if self.email_client_override is not None:
             email_client = self.email_client_override
         else:
@@ -127,13 +127,13 @@ class RunOrchestrator:
                 )
 
             ops_webhook = self.app_config.delivery.operational_discord_webhook_env
-            if result.status == WorkflowStatus.FAILED and not options.dry_run and ops_webhook:
+            if not options.dry_run and ops_webhook:
                 _send_operational_notification(
                     discord_client=discord_client,
                     webhook_env=ops_webhook,
                     user_id=user.id,
                     run_id=run_id,
-                    detail=result.detail or "unknown error",
+                    result=result,
                 )
 
             results.append(result)
@@ -154,22 +154,28 @@ class RunOrchestrator:
         return selected
 
 
+def _ops_message(user_id: str, run_id: str, result: WorkflowResult) -> str:
+    if result.status == WorkflowStatus.COMPLETED:
+        return f"Workflow completed for user {user_id} (run {run_id})."
+    if result.status == WorkflowStatus.MENU_UNAVAILABLE:
+        detail = result.detail or "unknown reason"
+        return f"Menu unavailable for user {user_id} (run {run_id}): {detail}"
+    return f"Workflow failed for user {user_id} (run {run_id}): {result.detail or 'unknown error'}"
+
+
 def _send_operational_notification(
     *,
     discord_client: DiscordClient,
     webhook_env: str,
     user_id: str,
     run_id: str,
-    detail: str,
+    result: WorkflowResult,
 ) -> None:
     try:
         discord_client.notify(
             DiscordMessage(
                 webhook_env=webhook_env,
-                content=(
-                    f"Meal orchestrator workflow failed for user {user_id} "
-                    f"during run {run_id}: {detail}"
-                ),
+                content=_ops_message(user_id, run_id, result),
             )
         )
     except Exception:
