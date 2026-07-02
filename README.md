@@ -189,11 +189,3 @@ now.
 - CI builds a Docker image but doesn't publish it to a registry.
 - No internal scheduler — a weekly run must be triggered externally (cron,
   systemd timer, CI schedule, etc.).
-
-## Roadmap
-
-- Publish the Docker image to a registry (GHCR/Docker Hub) from CI.
-- Optional partial-week processing instead of skipping a whole user.
-- Batch LLM execution and/or parallel per-user processing.
-- Optional internal scheduler mode, if external scheduling proves
-  inconvenient in practice.
