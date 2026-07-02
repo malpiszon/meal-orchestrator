@@ -5,6 +5,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from meal_orchestrator import __version__
 from meal_orchestrator.artifacts import ArtifactStore
 from meal_orchestrator.config import AppConfig, UserConfig
 from meal_orchestrator.delivery import DiscordClient, EmailClient
@@ -239,6 +240,7 @@ class UserWorkflowExecutor:
             )
         finally:
             metadata: dict = {
+                "app_version": __version__,
                 "run_id": run_context.run_id,
                 "user_id": user.id,
                 "provider": run_context.provider_id,
