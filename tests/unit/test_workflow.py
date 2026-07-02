@@ -4,6 +4,7 @@ import json
 from datetime import date
 from pathlib import Path
 
+from meal_orchestrator import __version__
 from meal_orchestrator.artifacts import ArtifactStore
 from meal_orchestrator.config.models import ArtifactConfig
 from meal_orchestrator.domain import (
@@ -150,6 +151,7 @@ def test_artifacts_written_on_successful_run(tmp_path: Path) -> None:
     metadata = json.loads((run_dir / "metadata.json").read_text())
     assert metadata["status"] == "completed"
     assert metadata["user_id"] == "alan"
+    assert metadata["app_version"] == __version__
 
 
 def test_llm_request_artifact_saved_on_dry_run(tmp_path: Path) -> None:
