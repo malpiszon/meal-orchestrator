@@ -8,9 +8,15 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   ci:
     uses: ./.github/workflows/ci.yml
+    with:
+      skip_docker: true
 
   publish:
     needs: ci
@@ -23,12 +29,23 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Verify tag is on the default branch
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/master; then
+            echo "::error::Tag $GITHUB_REF_NAME (commit $GITHUB_SHA) is not reachable from origin/master. Refusing to release from an unmerged commit."
+            exit 1
+          fi
+
       - name: Require Docker Hub image name to be configured
         run: |
           if [ -z "${{ vars.DOCKERHUB_IMAGE_NAME }}" ]; then
             echo "::error::Repository variable DOCKERHUB_IMAGE_NAME is not set (e.g. 'malpiszon/meal-orchestrator'). Set it in Settings > Secrets and variables > Actions > Variables."
             exit 1
           fi
+
+      - name: Determine release version
+        id: version
+        run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Determine if this tag is the latest release
         id: latest
@@ -77,6 +94,8 @@ jobs:
           context: .
           push: false
           load: true
+          build-args: |
+            VERSION=${{ steps.version.outputs.value }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -86,7 +105,7 @@ jobs:
         run: |
           image="$(head -n1 <<< '${{ steps.meta.outputs.tags }}')"
           actual="$(docker run --rm --entrypoint python "$image" -c 'import meal_orchestrator; print(meal_orchestrator.__version__)')"
-          expected="${GITHUB_REF_NAME#v}"
+          expected="${{ steps.version.outputs.value }}"
           if [ "$actual" != "$expected" ]; then
             echo "::error::Built image ($image) reports __version__ '$actual', expected '$expected' from tag $GITHUB_REF_NAME. Refusing to publish a mislabeled image."
             exit 1
