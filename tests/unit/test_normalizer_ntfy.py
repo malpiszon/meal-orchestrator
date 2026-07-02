@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from meal_orchestrator.domain import PurchasedMeal
+from meal_orchestrator.providers import MenuUnavailableError
 from meal_orchestrator.providers.ntfy.normalizer import normalize_ntfy_week
 
 _FIXTURE_DIR = Path("tests/fixtures/ntfy")
@@ -220,7 +221,7 @@ class TestNormalizeSizeFiltering:
         assert variants[0]["name"] == "Owsianka"
 
     def test_raises_on_unavailable_size(self) -> None:
-        with pytest.raises(ValueError, match="no size"):
+        with pytest.raises(MenuUnavailableError, match="no size"):
             normalize_ntfy_week(
                 raw_days=[_make_raw_day()],
                 provider_id="ntfy",

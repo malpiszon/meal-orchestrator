@@ -1,7 +1,7 @@
 from datetime import date
 
 from meal_orchestrator.domain import CanonicalDay, CanonicalMeal, CanonicalMenu, MealVariant
-from meal_orchestrator.prompt_builder import build_prompt_payload, render_llm_request_text
+from meal_orchestrator.prompt_builder import build_prompt_payload
 
 
 def test_prompt_builder_combines_user_prompt_and_compact_menu(tmp_path) -> None:
@@ -26,9 +26,6 @@ def test_prompt_builder_combines_user_prompt_and_compact_menu(tmp_path) -> None:
     )
 
     payload = build_prompt_payload(prompt_file, menu)
-    rendered = render_llm_request_text(payload)
 
-    assert "Prefer high protein." in rendered
-    assert '"provider":"example_provider"' in rendered
-    assert '"week_start":"2026-06-01"' in rendered
-    assert "Return plain text only." in rendered
+    assert payload.user_prompt == "Prefer high protein."
+    assert payload.menu is menu

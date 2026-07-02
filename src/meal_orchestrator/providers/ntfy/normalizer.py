@@ -14,6 +14,7 @@ from meal_orchestrator.domain import (
     Nutrition,
     PurchasedMeal,
 )
+from meal_orchestrator.providers import MenuUnavailableError
 
 # Maps ntfy meal_name.key values to canonical meal type strings used in config.
 _MEAL_TYPE_KEY_MAP: dict[str, str] = {
@@ -159,10 +160,12 @@ def _pick_size(
 ) -> dict[str, Any]:
     """Return the variant matching target_size exactly.
 
-    Raises ValueError if the purchased size is not available for this dish.
-    Because dish names are accent-folded before grouping, all size variants of
-    the same logical dish (including those with minor name typos) are in the
-    same group, so a missing size here indicates a genuine data gap.
+    Raises MenuUnavailableError if the purchased size is not yet published for
+    this dish — treated as expected menu unavailability rather than a hard
+    failure, since providers may publish some sizes before others. Because
+    dish names are accent-folded before grouping, all size variants of the
+    same logical dish (including those with minor name typos) are in the same
+    group, so a missing size here reliably means "not published yet."
     """
     available: list[str] = []
     for variant in size_variants:
@@ -171,8 +174,8 @@ def _pick_size(
         if size == target_size:
             return variant
         available.append(size or "?")
-    raise ValueError(
-        f"ntfy: dish {dish_name!r} has no size {target_size!r}; "
+    raise MenuUnavailableError(
+        f"ntfy: dish {dish_name!r} has no size {target_size!r} yet; "
         f"available: {sorted(set(available))}"
     )
 

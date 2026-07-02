@@ -109,6 +109,39 @@ def test_orchestrator_sends_operational_notification_on_failure(tmp_path) -> Non
     assert "provider exploded" in discord.messages[0].description
 
 
+def test_orchestrator_wires_configured_max_retries_into_llm_client(monkeypatch, tmp_path) -> None:
+    """OpenRouterClient must be constructed with app_config.llm.max_retries.
+
+    Only exercised when no llm_client override is supplied, since every other
+    orchestrator test bypasses this construction path.
+    """
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    captured_kwargs: dict = {}
+
+    class SpyOpenRouterClient:
+        def __init__(self, **kwargs) -> None:
+            captured_kwargs.update(kwargs)
+
+        def generate(self, request):
+            return LlmResult(text="Generated", model=request.model)
+
+    monkeypatch.setattr("meal_orchestrator.orchestrator.OpenRouterClient", SpyOpenRouterClient)
+
+    orchestrator = RunOrchestrator(
+        app_config=app_config(),
+        users=[user_config(prompt_file.relative_to(tmp_path))],
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        email_client=FakeEmailClient(),
+        discord_client=FakeDiscordClient(),
+    )
+
+    orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=True))
+
+    assert captured_kwargs == {"max_retries": app_config().llm.max_retries}
+
+
 def test_orchestrator_dry_run_suppresses_ops_notification(tmp_path) -> None:
     prompt_file = tmp_path / "prompt.md"
     prompt_file.write_text("Choose meals.", encoding="utf-8")

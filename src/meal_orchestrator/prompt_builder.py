@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from meal_orchestrator.domain import CanonicalMenu, PromptPayload
@@ -14,21 +13,4 @@ def build_prompt_payload(
     return PromptPayload(
         user_prompt=user_prompt,
         menu=menu,
-    )
-
-
-def render_llm_request_text(payload: PromptPayload) -> str:
-    menu_json = json.dumps(
-        payload.menu.to_compact_dict(),
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
-    return "\n\n".join(
-        [
-            "User instructions:",
-            payload.user_prompt,
-            "Canonical menu JSON:",
-            menu_json,
-            "Return plain text only.",
-        ]
     )
