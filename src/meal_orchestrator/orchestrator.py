@@ -77,7 +77,9 @@ class RunOrchestrator:
             email_client = self.email_client_override
         else:
             email_client = ResendEmailClient() if os.environ.get("RESEND_API_KEY") else None
-        llm_client = self.llm_client_override or OpenRouterClient()
+        llm_client = self.llm_client_override or OpenRouterClient(
+            max_retries=self.app_config.llm.max_retries
+        )
         provider_factory = self.provider_factory_override or build_provider_adapter
         artifact_store = ArtifactStore(self.app_config.artifacts)
         try:

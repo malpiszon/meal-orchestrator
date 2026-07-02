@@ -3,27 +3,18 @@ from __future__ import annotations
 import json
 import logging
 import os
-import urllib.error
-import urllib.request
 from typing import Any
 
 from meal_orchestrator import APP_NAME
 from meal_orchestrator.domain import LlmRequest, LlmResult, PromptPayload
-from meal_orchestrator.retries import with_retries
+from meal_orchestrator.http import post_json
+from meal_orchestrator.retries import is_transient_http_error, with_retries
 
 logger = logging.getLogger(__name__)
 
 _API_URL = "https://openrouter.ai/api/v1/chat/completions"
 _BASE_DELAY = 1.0
 _BACKOFF_FACTOR = 2.0
-
-
-def _is_transient(exc: Exception) -> bool:
-    if isinstance(exc, urllib.error.HTTPError):
-        return exc.code in (429, 500, 502, 503, 504)
-    if isinstance(exc, (urllib.error.URLError, TimeoutError)):
-        return True
-    return False
 
 
 def _build_message_content(payload: PromptPayload) -> list[dict[str, str]]:
@@ -62,16 +53,17 @@ class OpenRouterClient:
         }
 
         def _call() -> dict[str, Any]:
-            req = urllib.request.Request(_API_URL, data=body, headers=headers, method="POST")
-            with urllib.request.urlopen(req, timeout=request.timeout_seconds) as resp:
-                return json.loads(resp.read().decode("utf-8"))
+            raw = post_json(
+                _API_URL, headers=headers, body=body, timeout_seconds=request.timeout_seconds
+            )
+            return json.loads(raw.decode("utf-8"))
 
         response = with_retries(
             _call,
             max_attempts=self._max_retries,
             base_delay_seconds=_BASE_DELAY,
             backoff_factor=_BACKOFF_FACTOR,
-            retryable=_is_transient,
+            retryable=is_transient_http_error,
             operation_name=f"openrouter generate model={request.model}",
         )
 

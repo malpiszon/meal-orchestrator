@@ -7,6 +7,7 @@ from datetime import date
 from pathlib import Path
 
 from meal_orchestrator.config import load_app_config, load_users_config
+from meal_orchestrator.domain import WorkflowStatus
 from meal_orchestrator.observability import configure_logging
 from meal_orchestrator.orchestrator import RunOptions, RunOrchestrator
 
@@ -48,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
             llm_model=args.llm_model,
         )
     )
-    return 1 if any(result.status == "failed" for result in results) else 0
+    return 1 if any(result.status == WorkflowStatus.FAILED for result in results) else 0
 
 
 if __name__ == "__main__":

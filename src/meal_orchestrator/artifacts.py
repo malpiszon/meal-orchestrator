@@ -96,7 +96,11 @@ class ArtifactStore:
             return _FilesystemRunArtifacts(run_dir)
         except OSError:
             logger.warning(
-                "artifact store: failed to create run directory %s", run_dir, exc_info=True
+                "artifact store: failed to create run directory %s — artifacts disabled for "
+                "this run",
+                run_dir,
+                exc_info=True,
+                extra={"run_id": run_id, "user_id": user_id, "step": "artifacts"},
             )
             return RunArtifacts()
 

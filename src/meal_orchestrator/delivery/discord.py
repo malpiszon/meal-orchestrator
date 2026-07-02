@@ -3,12 +3,11 @@ from __future__ import annotations
 import json
 import logging
 import os
-import urllib.error
-import urllib.request
 from datetime import UTC, datetime
 
 from meal_orchestrator import APP_NAME, USER_AGENT
 from meal_orchestrator.domain import DiscordMessage
+from meal_orchestrator.http import post_json
 from meal_orchestrator.retries import is_transient_http_error, with_retries
 
 logger = logging.getLogger(__name__)
@@ -52,15 +51,9 @@ class DiscordWebhookClient:
         }
 
         def _call() -> None:
-            req = urllib.request.Request(webhook_url, data=body, headers=headers, method="POST")
-            try:
-                with urllib.request.urlopen(req, timeout=self._timeout_seconds) as resp:
-                    resp.read()
-            except urllib.error.HTTPError as exc:
-                detail = exc.read().decode("utf-8", errors="replace")
-                raise urllib.error.HTTPError(
-                    exc.url, exc.code, f"{exc.reason} — {detail}", exc.headers, None
-                ) from exc
+            post_json(
+                webhook_url, headers=headers, body=body, timeout_seconds=self._timeout_seconds
+            )
 
         with_retries(
             _call,

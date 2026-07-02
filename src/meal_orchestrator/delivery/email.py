@@ -3,11 +3,10 @@ from __future__ import annotations
 import json
 import logging
 import os
-import urllib.error
-import urllib.request
 
 from meal_orchestrator import USER_AGENT
 from meal_orchestrator.domain import EmailMessage
+from meal_orchestrator.http import post_json
 from meal_orchestrator.retries import is_transient_http_error, with_retries
 
 logger = logging.getLogger(__name__)
@@ -47,15 +46,7 @@ class ResendEmailClient:
         }
 
         def _call() -> None:
-            req = urllib.request.Request(_API_URL, data=body, headers=headers, method="POST")
-            try:
-                with urllib.request.urlopen(req, timeout=self._timeout_seconds) as resp:
-                    resp.read()
-            except urllib.error.HTTPError as exc:
-                detail = exc.read().decode("utf-8", errors="replace")
-                raise urllib.error.HTTPError(
-                    exc.url, exc.code, f"{exc.reason} — {detail}", exc.headers, None
-                ) from exc
+            post_json(_API_URL, headers=headers, body=body, timeout_seconds=self._timeout_seconds)
 
         with_retries(
             _call,
