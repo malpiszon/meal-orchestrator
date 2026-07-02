@@ -1,56 +1,127 @@
 # meal-orchestrator
 
-Scheduled automation service that fetches weekly meal menus from diet catering
-providers, filters them to purchased meals, sends the payload to an LLM through
-OpenRouter, then delivers the recommendation by email and Discord.
+A scheduled automation service that fetches a diet catering provider's weekly
+menu, filters it down to what a user actually purchased, asks an LLM (via
+OpenRouter) to pick the best option per day, and delivers the result by email
+and Discord.
 
-The `ntfy` provider integration, OpenRouter LLM client, Resend email delivery,
-and Discord webhook notifications are all implemented. Email is sent
-automatically when `RESEND_API_KEY` is set; Discord notifications are sent when
-the relevant webhook env vars are configured. Use `--dry-run` to suppress all
-external delivery.
+## Workflow
 
-## Local usage
+For each configured user, per run:
+
+1. Fetch the provider's menu for the target week (Monday–Friday).
+2. Normalize the raw provider response into a compact canonical menu
+   (purchased meal types and sizes only).
+3. Build a prompt from the user's own instructions plus the canonical menu.
+4. Send the prompt to an LLM through OpenRouter and get a plain-text
+   recommendation.
+5. Email the recommendation and post a Discord notification.
+
+A run processes users sequentially and also sends an operational Discord
+notification summarizing success/failure. If a user's menu isn't published
+yet for the target week, that user's LLM/email/delivery steps are skipped and
+a status notification is sent instead of treating it as an error.
+
+## Features
+
+- Multi-user configuration, run all users or a single one (`--user`).
+- Pluggable provider adapters; `ntfy` is the working integration, plus a
+  minimal `example_provider` used for tests and as a template.
+- OpenRouter LLM client with configurable model, timeout, and retries.
+- Email delivery via Resend, Discord notifications via webhooks (per-user and
+  operational), both optional and independently configurable.
+- `--dry-run` mode that runs the full pipeline (including the LLM call)
+  without sending email or Discord messages.
+- Per-run debug artifacts (raw provider response, canonical menu, LLM
+  request/response, run metadata) with retention-based cleanup.
+- Structured JSON logging to stdout.
+
+## Project structure
+
+```
+src/meal_orchestrator/
+  cli.py            entrypoint: argument parsing, env var checks
+  orchestrator.py    run-level orchestration: user selection, target week, operational notifications
+  workflow.py         per-user workflow: fetch -> normalize -> prompt -> LLM -> email -> Discord
+  config/              YAML loading and config dataclasses
+  domain/              shared dataclasses (canonical menu, requests/results, workflow status)
+  providers/           provider adapters, one package per provider
+  llm/                 OpenRouter client
+  delivery/            Resend email client, Discord webhook client
+  observability/       structured logging setup
+  artifacts.py         per-run debug artifact persistence
+  retries.py           shared retry/backoff helper
+  http.py              shared HTTP request helper
+tests/
+  unit/                unit tests, mocked HTTP, fakes for delivery clients
+  fixtures/            captured raw/canonical provider payloads
+config/
+  app.example.yaml     runtime settings
+  users.example.yaml   per-user settings
+prompts/               per-user prompt files referenced from users.yaml
+```
+
+## Configuration
+
+Copy the example files and edit them:
+
+- `config/app.example.yaml` — timezone, LLM model/timeout/retries, default
+  provider, delivery settings, artifact retention.
+- `config/users.example.yaml` — one entry per user: provider, provider
+  offering id, email, Discord ids, prompt file, and purchased meals (type +
+  size).
+
+Secrets are read from environment variables, never from YAML:
+
+- `OPENROUTER_API_KEY` — required; the process exits before doing anything
+  else if it's missing.
+- `RESEND_API_KEY` — optional; email delivery is skipped when absent.
+- `DISCORD_OPS_WEBHOOK_URL` — optional; operational notifications are
+  skipped when absent.
+- Each user's `discord_webhook_env` (referenced by name from
+  `users.yaml`) — optional; that user's Discord notification is skipped when
+  absent.
+
+## Local development
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
-meal-orchestrator --config config/app.example.yaml --users config/users.example.yaml --dry-run
 ```
 
-Run with real LLM output and delivery (email sent if `RESEND_API_KEY` is set):
-
-```bash
-meal-orchestrator --config config/app.example.yaml --users config/users.example.yaml
-meal-orchestrator --config config/app.example.yaml --users config/users.example.yaml --user example --week-start 2026-06-01
-meal-orchestrator --config config/app.example.yaml --users config/users.example.yaml --llm-model openai/gpt-4.1-nano
-```
-
-Skip all external calls for local testing:
+## Running the application
 
 ```bash
 meal-orchestrator --config config/app.example.yaml --users config/users.example.yaml --dry-run
 ```
 
-CLI flags: `--config`, `--users`, `--user`, `--provider`, `--week-start`,
-`--dry-run`, `--llm-model`, `--log-level`.
+Flags:
 
-## Configuration
+| Flag | Purpose |
+| --- | --- |
+| `--config` | Path to the app config YAML (default `config/app.example.yaml`) |
+| `--users` | Path to the users config YAML (default `config/users.example.yaml`) |
+| `--user` | Run a single user by id instead of all enabled users |
+| `--provider` | Override the configured provider for this run |
+| `--week-start` | Run against a specific week (`YYYY-MM-DD`), instead of the nearest upcoming Monday |
+| `--dry-run` | Run the full pipeline including the LLM call, but skip email/Discord delivery |
+| `--llm-model` | Override the configured OpenRouter model |
+| `--log-level` | Log level (default `INFO`) |
 
-Runtime settings live in `config/app.example.yaml` (copy and edit as
-`app.local.yaml` or similar), per-user settings in `config/users.example.yaml`.
-Secrets are read from environment variables, never from the YAML files:
+Exit code is `0` if every user's workflow completed (including expected
+menu-unavailable outcomes), `1` if any user's workflow failed.
 
-- `OPENROUTER_API_KEY` — required.
-- `RESEND_API_KEY` — optional; email delivery is skipped when absent.
-- `DISCORD_OPS_WEBHOOK_URL` — optional; operational notifications are skipped when absent.
-- Per-user `discord_webhook_env` values referenced in `users.yaml` — optional; that user's Discord notification is skipped when absent.
+## Testing
 
-Debug artifacts (raw provider response, canonical menu, LLM request/response,
-run metadata) are written per-run under `artifacts.path` when
-`artifacts.enabled: true`, with cleanup governed by `retention_days` and
-`max_runs_per_user`.
+```bash
+ruff check .
+pytest
+```
+
+Provider normalizers are tested against captured fixture payloads; delivery
+and LLM clients are tested against mocked HTTP responses, not real network
+calls.
 
 ## Docker
 
@@ -58,40 +129,71 @@ run metadata) are written per-run under `artifacts.path` when
 docker compose run --rm meal-orchestrator --dry-run
 ```
 
-## Tests
+The image is built by CI on every push/PR but is not currently published to
+a registry — build it locally (`docker build .`) or via `docker compose` for
+now.
 
-```bash
-ruff check .
-pytest
-```
+## Adding a new provider
 
-## Design notes
+1. Add a `providers/<name>/` package with a client (raw HTTP fetch, with
+   retry for transient failures) and a normalizer (raw response -> canonical
+   menu).
+2. Implement a class matching the `ProviderAdapter` protocol in
+   `providers/__init__.py`: a `provider_id` attribute and
+   `get_canonical_week_menu(request) -> ProviderResult`.
+3. Raise `MenuUnavailableError` for expected non-availability (e.g. the
+   provider hasn't published a given week/size yet) and
+   `ProviderNormalizationError` for malformed/unexpected data — these are
+   handled differently by the workflow (status notification vs. failure).
+4. Register the provider id in `build_provider_adapter()` in
+   `providers/__init__.py`.
+5. Add normalizer tests against fixture payloads, and point a user's
+   `provider` field at the new id.
 
-- **Single sequential service.** One container, one CLI entrypoint, users
-  processed one after another. Keeps deployment and failure handling simple
-  on a home-hosted Raspberry Pi; parallelism can be added later around the
-  per-user workflow boundary if needed.
-- **Provider-specific normalizers.** Each provider (e.g. `ntfy`) owns its own
-  raw-response parsing and its own transformation into the canonical menu
-  shape, rather than sharing a generic parser. Provider APIs are inconsistent
-  enough that a shared abstraction would be premature.
-- **Direct OpenRouter boundary.** `OpenRouterClient` is called directly from
-  the workflow instead of behind a generic `LlmClient` interface. OpenRouter
-  already abstracts over multiple model providers, so an extra layer isn't
-  worth the indirection until batch/async execution is needed.
-- **Menu unavailability is an expected outcome, not an error.** Providers
-  publish menus a limited number of days ahead. A `MenuUnavailableError`
-  (distinct from parse/normalization failures) short-circuits a user's
-  workflow: LLM/email are skipped and a status notification is sent instead
-  of failing the run.
-- **Failure handling by step:** provider fetch and OpenRouter calls retry
-  transient errors with exponential backoff and a timeout; normalization and
-  config loading fail fast (bad data/config, not worth retrying); email
-  delivery retries and blocks the workflow on exhaustion; Discord
-  notifications (user and operational) are best-effort and never block or
-  fail the run.
-- **English-only messaging for now.** Logs and both Discord message types are
-  in English to avoid taking on i18n before it's needed.
+## Design principles
+
+- **Single sequential service.** One process, one CLI entrypoint, users
+  processed one after another. Simple to run and reason about; parallelism
+  can be added later around the per-user workflow boundary if it's ever
+  needed.
+- **Provider-specific normalizers.** Each provider owns its own raw-response
+  parsing and canonical transformation rather than sharing a generic parser
+  — provider APIs are inconsistent enough that a shared abstraction would be
+  premature.
+- **Direct OpenRouter boundary.** No generic `LlmClient` interface — the
+  workflow calls `OpenRouterClient` directly. OpenRouter already abstracts
+  over multiple model providers, so the extra layer isn't worth it until
+  batch/async execution is needed.
+- **Menu unavailability is an expected outcome, not an error.** It short-
+  circuits a user's workflow (skip LLM/email, send a status notification)
+  rather than failing the run.
+- **Retry vs. fail-fast vs. best-effort, chosen per step.** Provider fetch
+  and OpenRouter calls retry transient errors with backoff; config loading
+  and normalization fail fast; email delivery retries and blocks the
+  workflow on exhaustion; Discord notifications are best-effort and never
+  block or fail a run.
 - **File-based configuration.** YAML plus environment variables for secrets;
-  no database. Sufficient for a small number of users on a fixed weekly
+  no database — adequate for a small, fixed set of users on a weekly
   schedule.
+- **English-only messaging for now.** Logs and Discord messages are English
+  to avoid taking on i18n before it's needed.
+
+## Known limitations
+
+- No web UI or database; everything is driven by CLI + YAML config.
+- Only one LLM request per user per run (no batching).
+- If any purchased meal is missing for any day in the target week, that
+  user's entire run is treated as menu-unavailable — there's no
+  partial-week handling.
+- No exactly-once delivery guarantee for email/Discord.
+- CI builds a Docker image but doesn't publish it to a registry.
+- No internal scheduler — a weekly run must be triggered externally (cron,
+  systemd timer, CI schedule, etc.).
+
+## Roadmap
+
+- Publish the Docker image to a registry (GHCR/Docker Hub) from CI.
+- Optional partial-week processing instead of skipping a whole user.
+- Batch LLM execution and/or parallel per-user processing.
+- Optional internal scheduler mode, if external scheduling proves
+  inconvenient in practice.
