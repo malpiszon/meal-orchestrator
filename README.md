@@ -129,9 +129,23 @@ calls.
 docker compose run --rm meal-orchestrator --dry-run
 ```
 
-The image is built by CI on every push/PR but is not currently published to
-a registry — build it locally (`docker build .`) or via `docker compose` for
-now.
+CI builds the image on every push/PR to validate it, but only publishes it
+when a version tag is released. Released images are published to both GHCR
+and Docker Hub as `ghcr.io/malpiszon/meal-orchestrator` and
+`malpiszon/meal-orchestrator`, tagged `<major>.<minor>.<patch>`,
+`<major>.<minor>`, `<major>`, and `latest`:
+
+```bash
+docker run --rm ghcr.io/malpiszon/meal-orchestrator:latest --help
+```
+
+## Versioning
+
+The application version is derived entirely from Git tags via
+`setuptools_scm` — there is no version string to bump in the codebase.
+Pushing a tag matching `vX.Y.Z` triggers the release workflow, which builds
+and publishes the Docker image and creates the GitHub Release with
+auto-generated notes.
 
 ## Adding a new provider
 
@@ -186,6 +200,5 @@ now.
   user's entire run is treated as menu-unavailable — there's no
   partial-week handling.
 - No exactly-once delivery guarantee for email/Discord.
-- CI builds a Docker image but doesn't publish it to a registry.
 - No internal scheduler — a weekly run must be triggered externally (cron,
   systemd timer, CI schedule, etc.).
