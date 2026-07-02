@@ -1,8 +1,9 @@
 # AGENTS.md
 
-Read and follow `docs/architecture.md`.
+Read `README.md` for the current architecture and design notes; the code is
+the source of truth.
 
-Prefer the simplest solution that satisfies the architecture.
+Prefer the simplest solution consistent with the existing design.
 
 Implement only what is required for the current task.
 
