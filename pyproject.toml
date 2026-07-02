@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=69"]
+requires = ["setuptools>=69", "setuptools_scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "meal-orchestrator"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Scheduled meal recommendation workflow skeleton"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -23,6 +23,9 @@ meal-orchestrator = "meal_orchestrator.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools_scm]
+fallback_version = "0.0.0"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
