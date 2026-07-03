@@ -17,6 +17,7 @@ class LlmConfig:
     model: str
     timeout_seconds: int
     max_retries: int
+    dry_run_model: str | None = None
 
 
 @dataclass(frozen=True)

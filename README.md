@@ -27,7 +27,9 @@ a status notification is sent instead of treating it as an error.
 - Multi-user configuration, run all users or a single one (`--user`).
 - Pluggable provider adapters; `ntfy` is the working integration, plus a
   minimal `example_provider` used for tests and as a template.
-- OpenRouter LLM client with configurable model, timeout, and retries.
+- OpenRouter LLM client with configurable model, timeout, and retries; an
+  optional `llm.dry_run_model` is used instead of `llm.model` during
+  `--dry-run` runs, so validation runs can use a cheaper model.
 - Email delivery via Resend, Discord notifications via webhooks (per-user and
   operational), both optional and independently configurable.
 - `--dry-run` mode that runs the full pipeline (including the LLM call)

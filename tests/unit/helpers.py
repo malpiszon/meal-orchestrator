@@ -22,6 +22,7 @@ def app_config() -> AppConfig:
         llm=LlmConfig(
             provider="openrouter",
             model="test-model",
+            dry_run_model="test-dry-run-model",
             timeout_seconds=30,
             max_retries=1,
         ),

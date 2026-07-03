@@ -15,7 +15,6 @@ from meal_orchestrator.domain import (
     DiscordMessage,
     EmailMessage,
     LlmRequest,
-    LlmResult,
     ProviderMenuRequest,
     RunContext,
     WorkflowResult,
@@ -99,25 +98,22 @@ class UserWorkflowExecutor:
             )
             logger.info("prompt payload built", extra={**log_context, "step": "prompt"})
 
+            if run_context.dry_run:
+                default_model = self.app_config.llm.dry_run_model or self.app_config.llm.model
+            else:
+                default_model = self.app_config.llm.model
+
             llm_request = LlmRequest(
-                model=run_context.llm_model or self.app_config.llm.model,
+                model=run_context.llm_model or default_model,
                 payload=prompt_payload,
                 timeout_seconds=self.app_config.llm.timeout_seconds,
             )
 
             artifacts.save_llm_request(llm_request)
 
-            if run_context.dry_run:
-                llm_result = LlmResult(
-                    text="Dry-run recommendation placeholder.",
-                    model=llm_request.model,
-                    token_usage={"prompt_tokens": 0, "completion_tokens": 0},
-                )
-                logger.info("llm generation skipped", extra={**log_context, "step": "llm"})
-            else:
-                llm_result = self.llm_client.generate(llm_request)
-                artifacts.save_llm_response(llm_result)
-                logger.info("llm result generated", extra={**log_context, "step": "llm"})
+            llm_result = self.llm_client.generate(llm_request)
+            artifacts.save_llm_response(llm_result)
+            logger.info("llm result generated", extra={**log_context, "step": "llm"})
 
             final_model = llm_result.model
             final_token_usage = llm_result.token_usage
