@@ -10,7 +10,8 @@ def test_load_example_config_files() -> None:
     users = load_users_config(Path("config/users.example.yaml"))
 
     assert app.runtime.timezone == "Europe/Warsaw"
-    assert app.llm.model == "openai/gpt-4.1-mini"
+    assert app.llm.model == "openai/gpt-5-mini"
+    assert app.llm.dry_run_model == "google/gemini-2.5-flash-lite"
     assert app.artifacts is not None
     assert app.artifacts.retention_days == 14
     assert app.artifacts.max_runs_per_user == 10
@@ -41,6 +42,31 @@ artifacts:
     )
     app = load_app_config(path)
     assert app.artifacts is None
+    assert app.llm.dry_run_model is None
+
+
+def test_dry_run_model_loaded_when_present(tmp_path) -> None:
+    path = tmp_path / "app.yaml"
+    path.write_text(
+        """
+runtime:
+  timezone: Europe/Warsaw
+llm:
+  provider: openrouter
+  model: test
+  dry_run_model: test-cheap-model
+  timeout_seconds: 30
+  max_retries: 1
+providers:
+  default: example_provider
+delivery:
+  email_from: test@example.com
+  operational_discord_webhook_env: DISCORD_OPS_WEBHOOK_URL
+""",
+        encoding="utf-8",
+    )
+    app = load_app_config(path)
+    assert app.llm.dry_run_model == "test-cheap-model"
 
 
 def test_artifacts_config_missing_path_raises(tmp_path) -> None:

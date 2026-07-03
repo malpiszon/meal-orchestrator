@@ -29,6 +29,7 @@ def load_app_config(path: Path) -> AppConfig:
             model=_required(data, "llm", "model"),
             timeout_seconds=int(_required(data, "llm", "timeout_seconds")),
             max_retries=int(_required(data, "llm", "max_retries")),
+            dry_run_model=_optional(data, "llm", "dry_run_model"),
         ),
         default_provider=_required(data, "providers", "default"),
         delivery=DeliveryConfig(

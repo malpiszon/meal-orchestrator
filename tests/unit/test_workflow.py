@@ -58,7 +58,7 @@ class FakeLlmClient:
         return LlmResult(text="Generated meal plan", model=request.model)
 
 
-def test_dry_run_builds_prompt_without_llm_or_email(tmp_path) -> None:
+def test_dry_run_calls_llm_with_dry_run_model_but_skips_delivery(tmp_path) -> None:
     prompt_file = tmp_path / "prompt.md"
     prompt_file.write_text("Choose meals.", encoding="utf-8")
     provider = FakeProvider()
@@ -73,7 +73,8 @@ def test_dry_run_builds_prompt_without_llm_or_email(tmp_path) -> None:
 
     assert result.status == WorkflowStatus.COMPLETED
     assert provider.requests
-    assert llm.requests == []
+    assert len(llm.requests) == 1
+    assert llm.requests[0].model == "test-dry-run-model"
     assert email.messages == []
     assert discord.messages == []
 
@@ -154,7 +155,7 @@ def test_artifacts_written_on_successful_run(tmp_path: Path) -> None:
     assert metadata["app_version"] == __version__
 
 
-def test_llm_request_artifact_saved_on_dry_run(tmp_path: Path) -> None:
+def test_llm_artifacts_saved_on_dry_run(tmp_path: Path) -> None:
     prompt_file = tmp_path / "prompt.md"
     prompt_file.write_text("Choose meals.", encoding="utf-8")
     artifacts_dir = tmp_path / "artifacts"
@@ -169,7 +170,7 @@ def test_llm_request_artifact_saved_on_dry_run(tmp_path: Path) -> None:
 
     run_dir = artifacts_dir / "alan" / "run-1"
     assert (run_dir / "llm_request.json").exists()
-    assert not (run_dir / "llm_response.txt").exists()
+    assert (run_dir / "llm_response.txt").exists()
     metadata = json.loads((run_dir / "metadata.json").read_text())
     assert metadata["status"] == "completed"
 
