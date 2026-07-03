@@ -137,14 +137,14 @@ def test_users_config_rejects_empty_purchased_meals(tmp_path) -> None:
     path.write_text(
         """
 users:
-  - id: alan
+  - id: user
     enabled: true
     provider: example_provider
     provider_offering_id: 123
-    email: alan@example.com
+    email: user@example.com
     discord_user_id: "123"
-    discord_webhook_env: DISCORD_ALAN_WEBHOOK_URL
-    prompt_file: prompts/alan.md
+    discord_webhook_env: DISCORD_USER_WEBHOOK_URL
+    prompt_file: prompts/user.md
     purchased_meals: []
 """,
         encoding="utf-8",
@@ -159,25 +159,25 @@ def test_users_config_rejects_duplicate_user_ids(tmp_path) -> None:
     path.write_text(
         """
 users:
-  - id: alan
+  - id: user
     enabled: true
     provider: example_provider
     provider_offering_id: 123
-    email: alan@example.com
+    email: user@example.com
     discord_user_id: "123"
-    discord_webhook_env: DISCORD_ALAN_WEBHOOK_URL
-    prompt_file: prompts/alan.md
+    discord_webhook_env: DISCORD_USER_WEBHOOK_URL
+    prompt_file: prompts/user.md
     purchased_meals:
       - type: breakfast
         size: M
-  - id: alan
+  - id: user
     enabled: true
     provider: example_provider
     provider_offering_id: 456
-    email: alan2@example.com
+    email: user2@example.com
     discord_user_id: "456"
-    discord_webhook_env: DISCORD_ALAN2_WEBHOOK_URL
-    prompt_file: prompts/alan2.md
+    discord_webhook_env: DISCORD_USER2_WEBHOOK_URL
+    prompt_file: prompts/user2.md
     purchased_meals:
       - type: lunch
         size: XL
@@ -194,14 +194,14 @@ def test_users_config_rejects_invalid_enabled_value(tmp_path) -> None:
     path.write_text(
         """
 users:
-  - id: alan
+  - id: user
     enabled: "yes"
     provider: example_provider
     provider_offering_id: 123
-    email: alan@example.com
+    email: user@example.com
     discord_user_id: "123"
-    discord_webhook_env: DISCORD_ALAN_WEBHOOK_URL
-    prompt_file: prompts/alan.md
+    discord_webhook_env: DISCORD_USER_WEBHOOK_URL
+    prompt_file: prompts/user.md
     purchased_meals:
       - type: breakfast
         size: M
@@ -218,15 +218,15 @@ def test_users_config_rejects_invalid_provider_offering_id(tmp_path) -> None:
     path.write_text(
         """
 users:
-  - id: alan
+  - id: user
     enabled: true
     provider: example_provider
     provider_offering_id:
       nested: value
-    email: alan@example.com
+    email: user@example.com
     discord_user_id: "123"
-    discord_webhook_env: DISCORD_ALAN_WEBHOOK_URL
-    prompt_file: prompts/alan.md
+    discord_webhook_env: DISCORD_USER_WEBHOOK_URL
+    prompt_file: prompts/user.md
     purchased_meals:
       - type: breakfast
         size: M
