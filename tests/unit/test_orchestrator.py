@@ -64,9 +64,11 @@ def test_orchestrator_uses_provider_override(tmp_path) -> None:
     assert provider.requests[0].provider_offering_id == 123
 
 
-def test_orchestrator_sends_operational_notification_on_completed(tmp_path) -> None:
+def test_orchestrator_sends_operational_notification_on_completed(tmp_path, monkeypatch) -> None:
     prompt_file = tmp_path / "prompt.md"
     prompt_file.write_text("Choose meals.", encoding="utf-8")
+    monkeypatch.setenv("DISCORD_OPS_WEBHOOK_URL", "https://example.com/ops")
+    monkeypatch.setenv("DISCORD_USER_WEBHOOK_URL", "https://example.com/user")
     discord = FakeDiscordClient()
 
     orchestrator = RunOrchestrator(
@@ -87,9 +89,11 @@ def test_orchestrator_sends_operational_notification_on_completed(tmp_path) -> N
     assert "completed" in ops_msg.description
 
 
-def test_orchestrator_sends_operational_notification_on_failure(tmp_path) -> None:
+def test_orchestrator_sends_operational_notification_on_failure(tmp_path, monkeypatch) -> None:
     prompt_file = tmp_path / "prompt.md"
     prompt_file.write_text("Choose meals.", encoding="utf-8")
+    monkeypatch.setenv("DISCORD_OPS_WEBHOOK_URL", "https://example.com/ops")
+    monkeypatch.setenv("DISCORD_USER_WEBHOOK_URL", "https://example.com/user")
     discord = FakeDiscordClient()
 
     orchestrator = RunOrchestrator(
@@ -107,6 +111,31 @@ def test_orchestrator_sends_operational_notification_on_failure(tmp_path) -> Non
     assert result[0].status == WorkflowStatus.FAILED
     assert discord.messages[0].webhook_env == "DISCORD_OPS_WEBHOOK_URL"
     assert "provider exploded" in discord.messages[0].description
+
+
+def test_orchestrator_skips_operational_notification_when_env_var_not_set(
+    tmp_path, monkeypatch
+) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    monkeypatch.delenv("DISCORD_OPS_WEBHOOK_URL", raising=False)
+    monkeypatch.setenv("DISCORD_USER_WEBHOOK_URL", "https://example.com/user")
+    discord = FakeDiscordClient()
+
+    orchestrator = RunOrchestrator(
+        app_config=app_config(),
+        users=[user_config(prompt_file.relative_to(tmp_path))],
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: FailingProvider(),
+        llm_client=FakeLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=discord,
+    )
+
+    result = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert result[0].status == WorkflowStatus.FAILED
+    assert discord.messages == []
 
 
 def test_orchestrator_wires_configured_max_retries_into_llm_client(monkeypatch, tmp_path) -> None:

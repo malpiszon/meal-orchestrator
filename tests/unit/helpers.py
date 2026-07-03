@@ -40,9 +40,9 @@ def user_config(prompt_file: Path = Path("prompt.md")) -> UserConfig:
         enabled=True,
         provider="example_provider",
         provider_offering_id=123,
-        email="alan@example.com",
+        email="user@example.com",
         discord_user_id="123",
-        discord_webhook_env="DISCORD_ALAN_WEBHOOK_URL",
+        discord_webhook_env="DISCORD_USER_WEBHOOK_URL",
         prompt_file=prompt_file,
         purchased_meals=[PurchasedMeal(type="breakfast", size="M")],
     )

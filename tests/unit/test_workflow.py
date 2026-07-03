@@ -97,9 +97,10 @@ def test_non_dry_run_calls_llm_and_email(tmp_path) -> None:
     assert email.idempotency_keys == ["run-1:alan:email"]
 
 
-def test_no_email_client_skips_email(tmp_path) -> None:
+def test_no_email_client_skips_email(tmp_path, monkeypatch) -> None:
     prompt_file = tmp_path / "prompt.md"
     prompt_file.write_text("Choose meals.", encoding="utf-8")
+    monkeypatch.setenv("DISCORD_USER_WEBHOOK_URL", "https://example.com/user")
     llm = FakeLlmClient()
     discord = FakeDiscordClient()
 
@@ -112,9 +113,10 @@ def test_no_email_client_skips_email(tmp_path) -> None:
     assert len(discord.messages) == 1
 
 
-def test_incomplete_menu_skips_llm_and_email(tmp_path) -> None:
+def test_incomplete_menu_skips_llm_and_email(tmp_path, monkeypatch) -> None:
     prompt_file = tmp_path / "prompt.md"
     prompt_file.write_text("Choose meals.", encoding="utf-8")
+    monkeypatch.setenv("DISCORD_USER_WEBHOOK_URL", "https://example.com/user")
     llm = FakeLlmClient()
     email = FakeEmailClient()
     discord = FakeDiscordClient()
@@ -226,6 +228,21 @@ def test_discord_skipped_on_menu_unavailable_when_discord_user_id_is_none(tmp_pa
     result = executor.execute(user_without_id, _context(dry_run=False))
 
     assert result.status == WorkflowStatus.MENU_UNAVAILABLE
+    assert discord.messages == []
+
+
+def test_discord_skipped_when_webhook_env_var_not_set(tmp_path, monkeypatch) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    monkeypatch.delenv("DISCORD_USER_WEBHOOK_URL", raising=False)
+    discord = FakeDiscordClient()
+
+    executor = _executor(tmp_path, FakeProvider(), FakeLlmClient(), FakeEmailClient(), discord)
+    result = executor.execute(
+        user_config(PathLikePrompt(prompt_file, tmp_path)), _context(dry_run=False)
+    )
+
+    assert result.status == WorkflowStatus.COMPLETED
     assert discord.messages == []
 
 

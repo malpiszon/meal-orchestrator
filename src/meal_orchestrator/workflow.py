@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -170,7 +171,12 @@ class UserWorkflowExecutor:
                     )
             else:
                 logger.info(
-                    "discord notification skipped", extra={**log_context, "step": "discord"}
+                    "discord notification skipped",
+                    extra={
+                        **log_context,
+                        "step": "discord",
+                        "reason": _discord_disabled_reason(run_context, user),
+                    },
                 )
 
             logger.info("user workflow completed", extra={**log_context, "step": "complete"})
@@ -254,7 +260,17 @@ class UserWorkflowExecutor:
 
 
 def _discord_enabled(run_context: RunContext, user: UserConfig) -> bool:
-    return not run_context.dry_run and bool(user.discord_webhook_env) and bool(user.discord_user_id)
+    return _discord_disabled_reason(run_context, user) is None
+
+
+def _discord_disabled_reason(run_context: RunContext, user: UserConfig) -> str | None:
+    if run_context.dry_run:
+        return "dry run"
+    if not user.discord_webhook_env or not user.discord_user_id:
+        return "not configured"
+    if not os.environ.get(user.discord_webhook_env):
+        return "env var not set"
+    return None
 
 
 def _json_size(menu) -> int:

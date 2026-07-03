@@ -131,13 +131,24 @@ class RunOrchestrator:
 
             ops_webhook = self.app_config.delivery.operational_discord_webhook_env
             if not options.dry_run and ops_webhook:
-                _send_operational_notification(
-                    discord_client=discord_client,
-                    webhook_env=ops_webhook,
-                    user_id=user.id,
-                    run_id=run_id,
-                    result=result,
-                )
+                if os.environ.get(ops_webhook):
+                    _send_operational_notification(
+                        discord_client=discord_client,
+                        webhook_env=ops_webhook,
+                        user_id=user.id,
+                        run_id=run_id,
+                        result=result,
+                    )
+                else:
+                    logger.info(
+                        "operational discord notification skipped: env var not set",
+                        extra={
+                            "run_id": run_id,
+                            "user_id": user.id,
+                            "step": "ops_notify",
+                            "webhook_env": ops_webhook,
+                        },
+                    )
 
             results.append(result)
 
