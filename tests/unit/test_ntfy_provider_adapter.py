@@ -23,11 +23,51 @@ _PRODUCT_BREAKFAST_M = {
     "protein": 10.0,
 }
 
+# ntfy always offers exactly 3 dish options per meal type, so fixtures here
+# include 2 filler dishes alongside the one under test.
+_PRODUCT_BREAKFAST_FILLER_1 = {
+    "id": 11,
+    "name": "Filler dish 1",
+    "size_tag": {"value": "M"},
+    "composition": "filler",
+    "protein": 1.0,
+}
+_PRODUCT_BREAKFAST_FILLER_2 = {
+    "id": 12,
+    "name": "Filler dish 2",
+    "size_tag": {"value": "M"},
+    "composition": "filler",
+    "protein": 1.0,
+}
+
 _INCLUDES = {
     "diet_variant_meal_types": [_MEAL_TYPE_BREAKFAST],
-    "simple_products": [_PRODUCT_BREAKFAST_M],
+    "simple_products": [
+        _PRODUCT_BREAKFAST_M,
+        _PRODUCT_BREAKFAST_FILLER_1,
+        _PRODUCT_BREAKFAST_FILLER_2,
+    ],
 }
-_RESULTS = [{"diet_variant_meal_type_id": 1, "simple_product_id": 10, "diet_variant_id": 1}]
+_RESULTS = [
+    {
+        "diet_variant_meal_type_id": 1,
+        "simple_product_id": 10,
+        "diet_variant_id": 1,
+        "configurable_product_id": 100,
+    },
+    {
+        "diet_variant_meal_type_id": 1,
+        "simple_product_id": 11,
+        "diet_variant_id": 2,
+        "configurable_product_id": 101,
+    },
+    {
+        "diet_variant_meal_type_id": 1,
+        "simple_product_id": 12,
+        "diet_variant_id": 3,
+        "configurable_product_id": 102,
+    },
+]
 
 
 def _make_raw_day(day_date: str) -> dict:
@@ -65,7 +105,13 @@ def test_adapter_wraps_malformed_data_as_normalization_error(monkeypatch) -> Non
 
     still fail fast as ProviderNormalizationError, distinct from menu unavailability.
     """
-    broken_results = [{"diet_variant_meal_type_id": 1, "simple_product_id": 999}]
+    broken_results = [
+        {
+            "diet_variant_meal_type_id": 1,
+            "simple_product_id": 999,
+            "configurable_product_id": 100,
+        }
+    ]
     monkeypatch.setattr(
         NtfyClient,
         "fetch_week_raw",

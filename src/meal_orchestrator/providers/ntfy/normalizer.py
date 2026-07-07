@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import unicodedata
 from collections import defaultdict
 from datetime import date
 from typing import Any
@@ -25,6 +24,11 @@ _MEAL_TYPE_KEY_MAP: dict[str, str] = {
     "DINNER": "dinner",
     "SNACK": "snack",
 }
+
+# ntfy contractually offers exactly 3 dish variants (one per diet plan) for
+# every meal type, every day. Anything else means data is missing or
+# misgrouped upstream and must not be delivered to the user silently.
+_VARIANTS_PER_MEAL = 3
 
 
 def normalize_ntfy_week(
@@ -73,16 +77,20 @@ def _normalize_day(
     meal_type_map = _build_meal_type_map(includes)
     product_map = _build_product_map(includes)
 
-    # Group products by (canonical_type, accent-folded dish name).
-    # Folding merges size-variant entries whose names differ only in diacritics
-    # (a known provider data-quality issue) into a single group so that all
-    # size variants of the same logical dish are considered together.
-    groups: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(lambda: defaultdict(list))
+    # Group products by (canonical_type, configurable_product_id). Every
+    # result row carries a configurable_product_id identifying the logical
+    # dish its simple_product (a specific size) belongs to, so this reliably
+    # groups all size variants of the same dish together — including cases
+    # where the provider publishes a size under a mismatched/mistranslated
+    # dish name (a known data-quality issue), which name-based grouping would
+    # incorrectly split into separate dishes.
+    groups: dict[str, dict[int, list[dict[str, Any]]]] = defaultdict(lambda: defaultdict(list))
 
     for row in results:
         mt_id = row.get("diet_variant_meal_type_id")
         prod_id = row.get("simple_product_id")
-        if mt_id is None or prod_id is None:
+        configurable_id = row.get("configurable_product_id")
+        if mt_id is None or prod_id is None or configurable_id is None:
             continue
 
         canonical_type = meal_type_map.get(mt_id)
@@ -95,12 +103,11 @@ def _normalize_day(
                 f"ntfy: simple_product_id={prod_id} referenced in results but not in includes"
             )
 
-        name = product.get("name")
-        if not name:
+        if not product.get("name"):
             raise ValueError(
                 f"ntfy: simple_product_id={prod_id} has no name"
             )
-        groups[canonical_type][_accent_fold(name)].append(product)
+        groups[canonical_type][configurable_id].append(product)
 
     # For each purchased meal, pick the matching size variant of every dish.
     canonical_meals: list[CanonicalMeal] = []
@@ -109,13 +116,17 @@ def _normalize_day(
         if not dishes:
             continue
 
-        variants: list[MealVariant] = []
-        for dish_name, size_variants in dishes.items():
-            product = _pick_size(dish_name, size_variants, pm.size)
-            variants.append(_to_meal_variant(product))
+        if len(dishes) != _VARIANTS_PER_MEAL:
+            raise ValueError(
+                f"ntfy: expected {_VARIANTS_PER_MEAL} dishes for meal type "
+                f"{pm.type!r}, got {len(dishes)}"
+            )
 
-        if variants:
-            canonical_meals.append(CanonicalMeal(type=pm.type, variants=variants))
+        variants: list[MealVariant] = [
+            _to_meal_variant(_pick_size(size_variants, pm.size))
+            for size_variants in dishes.values()
+        ]
+        canonical_meals.append(CanonicalMeal(type=pm.type, variants=variants))
 
     return canonical_meals
 
@@ -139,22 +150,7 @@ def _build_product_map(includes: dict[str, Any]) -> dict[int, dict[str, Any]]:
     return {p["id"]: p for p in (includes.get("simple_products") or []) if "id" in p}
 
 
-def _accent_fold(s: str) -> str:
-    """Casefold and strip combining diacritical marks for dish-name grouping.
-
-    Merges names that differ only in accents/diacritics (e.g. a provider typo
-    that writes 'niedzwiedzim' instead of 'niedźwiedzim') into the same group key
-    so that all size variants of the same logical dish are considered together.
-    """
-    return "".join(
-        c
-        for c in unicodedata.normalize("NFD", s.casefold())
-        if unicodedata.category(c) != "Mn"
-    )
-
-
 def _pick_size(
-    dish_name: str,
     size_variants: list[dict[str, Any]],
     target_size: str,
 ) -> dict[str, Any]:
@@ -163,19 +159,21 @@ def _pick_size(
     Raises MenuUnavailableError if the purchased size is not yet published for
     this dish — treated as expected menu unavailability rather than a hard
     failure, since providers may publish some sizes before others. Because
-    dish names are accent-folded before grouping, all size variants of the
-    same logical dish (including those with minor name typos) are in the same
-    group, so a missing size here reliably means "not published yet."
+    dishes are grouped by configurable_product_id before this is called, all
+    size variants of the same logical dish are in the same group regardless
+    of naming, so a missing size here reliably means "not published yet."
     """
     available: list[str] = []
+    names: set[str] = set()
     for variant in size_variants:
         size_tag = variant.get("size_tag")
         size = size_tag.get("value") if size_tag else None
         if size == target_size:
             return variant
         available.append(size or "?")
+        names.add(variant.get("name", ""))
     raise MenuUnavailableError(
-        f"ntfy: dish {dish_name!r} has no size {target_size!r} yet; "
+        f"ntfy: dish {sorted(names)!r} has no size {target_size!r} yet; "
         f"available: {sorted(set(available))}"
     )
 
