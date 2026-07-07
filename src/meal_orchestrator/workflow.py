@@ -198,6 +198,8 @@ class UserWorkflowExecutor:
                 detail=final_error,
             )
         except MenuUnavailableError as exc:
+            if exc.raw_response is not None:
+                artifacts.save_provider_raw(exc.raw_response)
             final_error = str(exc)
             logger.info("menu unavailable", extra={**log_context, "step": "provider"})
             final_status = WorkflowStatus.MENU_UNAVAILABLE

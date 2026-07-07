@@ -96,8 +96,10 @@ def test_adapter_propagates_menu_unavailable_uncaught(monkeypatch) -> None:
         lambda self, week_start, week_end, offer_id: [_make_raw_day("2026-06-29")],
     )
 
-    with pytest.raises(MenuUnavailableError):
+    with pytest.raises(MenuUnavailableError) as exc_info:
         NtfyProviderAdapter().get_canonical_week_menu(_request(size="XXL"))
+
+    assert exc_info.value.raw_response == [_make_raw_day("2026-06-29")]
 
 
 def test_adapter_wraps_malformed_data_as_normalization_error(monkeypatch) -> None:
