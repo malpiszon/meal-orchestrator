@@ -8,12 +8,11 @@ import pytest
 
 from meal_orchestrator.domain import PurchasedMeal
 from meal_orchestrator.providers import MenuUnavailableError
-from meal_orchestrator.providers.ntfy.normalizer import (
+from meal_orchestrator.providers.ntfy import (
     _DEFAULT_VARIANTS_PER_MEAL,
-    _MEAL_TYPE_KEY_MAP,
     _VARIANTS_PER_MEAL_OVERRIDES,
-    normalize_ntfy_week,
 )
+from meal_orchestrator.providers.ntfy.normalizer import _MEAL_TYPE_KEY_MAP, normalize_ntfy_week
 
 _FIXTURE_DIR = Path("tests/fixtures/ntfy")
 
@@ -24,12 +23,21 @@ _WEEK_END = date(2026, 7, 3)
 # meal type; see _VARIANTS_PER_MEAL_OVERRIDES for the SNACK exception.
 _VARIANTS_PER_MEAL = _DEFAULT_VARIANTS_PER_MEAL
 
+
+def _expected_variants_per_meal(meal_type: str) -> int | None:
+    return _VARIANTS_PER_MEAL_OVERRIDES.get(meal_type, _DEFAULT_VARIANTS_PER_MEAL)
+
+
 # Minimal inline raw_day payloads used for targeted unit tests.
 _MEAL_TYPE_BREAKFAST = {
-    "id": 1, "diet_id": 1, "meal_name": {"key": "BREAKFAST", "value": "Śniadanie"}
+    "id": 1,
+    "diet_id": 1,
+    "meal_name": {"key": "BREAKFAST", "value": "Śniadanie"},
 }
 _MEAL_TYPE_SECOND_BREAKFAST = {
-    "id": 2, "diet_id": 1, "meal_name": {"key": "SECOND-BREAKFAST", "value": "Drugie śniadanie"}
+    "id": 2,
+    "diet_id": 1,
+    "meal_name": {"key": "SECOND-BREAKFAST", "value": "Drugie śniadanie"},
 }
 _MEAL_TYPE_LUNCH = {"id": 3, "diet_id": 1, "meal_name": {"key": "LUNCH", "value": "Obiad"}}
 _MEAL_TYPE_TEA = {"id": 4, "diet_id": 1, "meal_name": {"key": "TEA", "value": "Podwieczorek"}}
@@ -65,17 +73,24 @@ _PRODUCT_LUNCH_XL = {
     "salt": 2.0,
 }
 _PRODUCT_SECOND_BREAKFAST_S = {
-    **_PRODUCT_BREAKFAST_M, "id": 30, "name": "Jabłko", "size_tag": {"value": "S"}
+    **_PRODUCT_BREAKFAST_M,
+    "id": 30,
+    "name": "Jabłko",
+    "size_tag": {"value": "S"},
 }
 _PRODUCT_TEA_S = {
-    **_PRODUCT_BREAKFAST_M, "id": 40, "name": "Herbata z mlekiem", "size_tag": {"value": "S"}
+    **_PRODUCT_BREAKFAST_M,
+    "id": 40,
+    "name": "Herbata z mlekiem",
+    "size_tag": {"value": "S"},
 }
 _PRODUCT_DINNER_M = {
-    **_PRODUCT_BREAKFAST_M, "id": 50, "name": "Sałatka wieczorna", "size_tag": {"value": "M"}
+    **_PRODUCT_BREAKFAST_M,
+    "id": 50,
+    "name": "Sałatka wieczorna",
+    "size_tag": {"value": "M"},
 }
-_PRODUCT_SNACK_S = {
-    **_PRODUCT_BREAKFAST_M, "id": 60, "name": "Orzechy", "size_tag": {"value": "S"}
-}
+_PRODUCT_SNACK_S = {**_PRODUCT_BREAKFAST_M, "id": 60, "name": "Orzechy", "size_tag": {"value": "S"}}
 
 
 def _filler_dishes(
@@ -186,6 +201,7 @@ class TestNormalizeMealTypeFiltering:
             week_end=_WEEK_END,
             user_id="example",
             purchased_meals=[PurchasedMeal(type="breakfast", size="M")],
+            expected_variants_per_meal=_expected_variants_per_meal,
         )
 
         payload = menu.to_compact_dict()
@@ -205,6 +221,7 @@ class TestNormalizeMealTypeFiltering:
                 PurchasedMeal(type="breakfast", size="M"),
                 PurchasedMeal(type="lunch", size="XL"),
             ],
+            expected_variants_per_meal=_expected_variants_per_meal,
         )
 
         types = {m["type"] for m in menu.to_compact_dict()["days"][0]["meals"]}
@@ -220,8 +237,14 @@ class TestNormalizeMealTypeFiltering:
             (_MEAL_TYPE_SNACK, _PRODUCT_SNACK_S, "S"),
         ]
 
-        products = [_PRODUCT_BREAKFAST_M, _PRODUCT_SECOND_BREAKFAST_S, _PRODUCT_LUNCH_XL,
-                    _PRODUCT_TEA_S, _PRODUCT_DINNER_M, _PRODUCT_SNACK_S]
+        products = [
+            _PRODUCT_BREAKFAST_M,
+            _PRODUCT_SECOND_BREAKFAST_S,
+            _PRODUCT_LUNCH_XL,
+            _PRODUCT_TEA_S,
+            _PRODUCT_DINNER_M,
+            _PRODUCT_SNACK_S,
+        ]
         results = [
             {
                 "diet_variant_meal_type_id": mt["id"],
@@ -259,6 +282,7 @@ class TestNormalizeMealTypeFiltering:
                 PurchasedMeal(type="dinner", size="M"),
                 PurchasedMeal(type="snack", size="S"),
             ],
+            expected_variants_per_meal=_expected_variants_per_meal,
         )
 
         meal_types = {m["type"] for m in menu.to_compact_dict()["days"][0]["meals"]}
@@ -272,6 +296,7 @@ class TestNormalizeMealTypeFiltering:
             week_end=_WEEK_END,
             user_id="example",
             purchased_meals=[PurchasedMeal(type="lunch", size="XL")],
+            expected_variants_per_meal=_expected_variants_per_meal,
         )
 
         types = {m["type"] for m in menu.to_compact_dict()["days"][0]["meals"]}
@@ -287,6 +312,7 @@ class TestNormalizeSizeFiltering:
             week_end=_WEEK_END,
             user_id="example",
             purchased_meals=[PurchasedMeal(type="breakfast", size="M")],
+            expected_variants_per_meal=_expected_variants_per_meal,
         )
 
         variants = menu.to_compact_dict()["days"][0]["meals"][0]["variants"]
@@ -303,6 +329,7 @@ class TestNormalizeSizeFiltering:
                 week_end=_WEEK_END,
                 user_id="example",
                 purchased_meals=[PurchasedMeal(type="breakfast", size="XXL")],
+                expected_variants_per_meal=_expected_variants_per_meal,
             )
 
     def test_mismatched_name_variant_merged_via_configurable_product_id(self) -> None:
@@ -313,11 +340,12 @@ class TestNormalizeSizeFiltering:
         # correct size is found without duplication or failure.
         product_xl = {**_PRODUCT_LUNCH_XL}  # name "Kurczak z ryżem", size XL
         product_l_mismatched = {
-            **_PRODUCT_LUNCH_XL, "id": 21, "name": "Kurczak z ryzem", "size_tag": {"value": "L"}
+            **_PRODUCT_LUNCH_XL,
+            "id": 21,
+            "name": "Kurczak z ryzem",
+            "size_tag": {"value": "L"},
         }
-        filler_products, filler_results = _filler_dishes(
-            mt_id=3, size="XL", count=2, id_start=921
-        )
+        filler_products, filler_results = _filler_dishes(mt_id=3, size="XL", count=2, id_start=921)
         includes = {
             "diet_variant_meal_types": [_MEAL_TYPE_LUNCH],
             "simple_products": [product_xl, product_l_mismatched, *filler_products],
@@ -345,6 +373,7 @@ class TestNormalizeSizeFiltering:
             week_end=_WEEK_END,
             user_id="example",
             purchased_meals=[PurchasedMeal(type="lunch", size="XL")],
+            expected_variants_per_meal=_expected_variants_per_meal,
         )
 
         variants = menu.to_compact_dict()["days"][0]["meals"][0]["variants"]
@@ -356,9 +385,7 @@ class TestNormalizeSizeFiltering:
 class TestNormalizeVariants:
     def test_all_dish_variants_for_meal_type_included(self) -> None:
         product_b = {**_PRODUCT_BREAKFAST_M, "id": 30, "name": "Granola"}
-        filler_products, filler_results = _filler_dishes(
-            mt_id=1, size="M", count=1, id_start=931
-        )
+        filler_products, filler_results = _filler_dishes(mt_id=1, size="M", count=1, id_start=931)
         results = [
             {
                 "diet_variant_meal_type_id": 1,
@@ -386,6 +413,7 @@ class TestNormalizeVariants:
             week_end=_WEEK_END,
             user_id="example",
             purchased_meals=[PurchasedMeal(type="breakfast", size="M")],
+            expected_variants_per_meal=_expected_variants_per_meal,
         )
 
         variants = menu.to_compact_dict()["days"][0]["meals"][0]["variants"]
@@ -400,6 +428,7 @@ class TestNormalizeVariants:
             week_end=_WEEK_END,
             user_id="example",
             purchased_meals=[PurchasedMeal(type="breakfast", size="M")],
+            expected_variants_per_meal=_expected_variants_per_meal,
         )
 
         variants = menu.to_compact_dict()["days"][0]["meals"][0]["variants"]
@@ -414,9 +443,7 @@ class TestNormalizeVariants:
 
     def test_composition_whitespace_normalized(self) -> None:
         product = {**_PRODUCT_BREAKFAST_M, "composition": "  płatki  owsiane,\tmleko  "}
-        filler_products, filler_results = _filler_dishes(
-            mt_id=1, size="M", count=2, id_start=941
-        )
+        filler_products, filler_results = _filler_dishes(mt_id=1, size="M", count=2, id_start=941)
         includes = {
             "diet_variant_meal_types": [_MEAL_TYPE_BREAKFAST],
             "simple_products": [product, *filler_products],
@@ -438,6 +465,7 @@ class TestNormalizeVariants:
             week_end=_WEEK_END,
             user_id="example",
             purchased_meals=[PurchasedMeal(type="breakfast", size="M")],
+            expected_variants_per_meal=_expected_variants_per_meal,
         )
 
         variants = menu.to_compact_dict()["days"][0]["meals"][0]["variants"]
@@ -452,9 +480,7 @@ class TestNormalizeVariants:
             "composition": "owsianka",
             "protein": 10.0,
         }
-        filler_products, filler_results = _filler_dishes(
-            mt_id=1, size="M", count=2, id_start=951
-        )
+        filler_products, filler_results = _filler_dishes(mt_id=1, size="M", count=2, id_start=951)
         includes = {
             "diet_variant_meal_types": [_MEAL_TYPE_BREAKFAST],
             "simple_products": [product, *filler_products],
@@ -476,6 +502,7 @@ class TestNormalizeVariants:
             week_end=_WEEK_END,
             user_id="example",
             purchased_meals=[PurchasedMeal(type="breakfast", size="M")],
+            expected_variants_per_meal=_expected_variants_per_meal,
         )
 
         variants = menu.to_compact_dict()["days"][0]["meals"][0]["variants"]
@@ -498,6 +525,7 @@ class TestNormalizeDayFiltering:
             week_end=date(2026, 7, 3),
             user_id="example",
             purchased_meals=[PurchasedMeal(type="breakfast", size="M")],
+            expected_variants_per_meal=_expected_variants_per_meal,
         )
 
         dates = [d["date"] for d in menu.to_compact_dict()["days"]]
@@ -511,6 +539,7 @@ class TestNormalizeDayFiltering:
             week_end=_WEEK_END,
             user_id="example",
             purchased_meals=[PurchasedMeal(type="snack", size="S")],
+            expected_variants_per_meal=_expected_variants_per_meal,
         )
 
         assert menu.to_compact_dict()["days"] == []
@@ -539,6 +568,7 @@ class TestNormalizeErrorCases:
                 week_end=_WEEK_END,
                 user_id="example",
                 purchased_meals=[PurchasedMeal(type="breakfast", size="M")],
+                expected_variants_per_meal=_expected_variants_per_meal,
             )
 
     def test_unknown_meal_type_key_skipped(self) -> None:
@@ -563,6 +593,7 @@ class TestNormalizeErrorCases:
             week_end=_WEEK_END,
             user_id="example",
             purchased_meals=[PurchasedMeal(type="breakfast", size="M")],
+            expected_variants_per_meal=_expected_variants_per_meal,
         )
 
         assert menu.to_compact_dict()["days"] == []
@@ -592,6 +623,7 @@ class TestNormalizeErrorCases:
                 week_end=_WEEK_END,
                 user_id="example",
                 purchased_meals=[PurchasedMeal(type="breakfast", size="M")],
+                expected_variants_per_meal=_expected_variants_per_meal,
             )
 
 
@@ -604,6 +636,7 @@ class TestNormalizeCanonicalShape:
             week_end=date(2026, 7, 3),
             user_id="example",
             purchased_meals=[PurchasedMeal(type="breakfast", size="M")],
+            expected_variants_per_meal=_expected_variants_per_meal,
         )
 
         payload = menu.to_compact_dict()
@@ -632,6 +665,7 @@ class TestNormalizeWithRealFixtures:
                 PurchasedMeal(type="breakfast", size="M"),
                 PurchasedMeal(type="lunch", size="XL"),
             ],
+            expected_variants_per_meal=_expected_variants_per_meal,
         )
 
         payload = menu.to_compact_dict()
@@ -660,6 +694,7 @@ class TestNormalizeWithRealFixtures:
                 PurchasedMeal(type="breakfast", size="M"),
                 PurchasedMeal(type="lunch", size="XL"),
             ],
+            expected_variants_per_meal=_expected_variants_per_meal,
         )
 
         assert menu.to_compact_dict() == canonical_fixture
@@ -679,6 +714,7 @@ class TestNormalizeWithRealFixtures:
                 PurchasedMeal(type="breakfast", size="M"),
                 PurchasedMeal(type="lunch", size="XL"),
             ],
+            expected_variants_per_meal=_expected_variants_per_meal,
         )
 
         day = menu.to_compact_dict()["days"][0]
@@ -698,9 +734,7 @@ class TestNormalizeWithRealFixtures:
         # MenuUnavailableError even though that size was clearly present in
         # the payload for the same dish.
         def _load(fixture_date: str) -> dict:
-            data = json.loads(
-                (_FIXTURE_DIR / f"raw_offer8_{fixture_date}.json").read_bytes()
-            )
+            data = json.loads((_FIXTURE_DIR / f"raw_offer8_{fixture_date}.json").read_bytes())
             root = data.get("data", data)
             return {
                 "date": fixture_date,
@@ -716,11 +750,10 @@ class TestNormalizeWithRealFixtures:
             week_end=date(2026, 7, 17),
             user_id="example",
             purchased_meals=[PurchasedMeal(type="lunch", size=size)],
+            expected_variants_per_meal=_expected_variants_per_meal,
         )
 
-        lunch = next(
-            m for m in menu.to_compact_dict()["days"][0]["meals"] if m["type"] == "lunch"
-        )
+        lunch = next(m for m in menu.to_compact_dict()["days"][0]["meals"] if m["type"] == "lunch")
         assert len(lunch["variants"]) == 3
 
     @pytest.mark.parametrize(
@@ -738,6 +771,7 @@ class TestNormalizeWithRealFixtures:
                 PurchasedMeal(type="breakfast", size="M"),
                 PurchasedMeal(type="lunch", size="XL"),
             ],
+            expected_variants_per_meal=_expected_variants_per_meal,
         )
 
         for meal in menu.to_compact_dict()["days"][0]["meals"]:
@@ -758,9 +792,8 @@ class TestNormalizeWithRealFixtures:
             week_end=date(2026, 7, 3),
             user_id="example",
             purchased_meals=[PurchasedMeal(type="snack", size="S")],
+            expected_variants_per_meal=_expected_variants_per_meal,
         )
 
-        snack = next(
-            m for m in menu.to_compact_dict()["days"][0]["meals"] if m["type"] == "snack"
-        )
+        snack = next(m for m in menu.to_compact_dict()["days"][0]["meals"] if m["type"] == "snack")
         assert len(snack["variants"]) == 2

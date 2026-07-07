@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Protocol
+from abc import ABC, abstractmethod
+from typing import Any
 
 from meal_orchestrator.domain import ProviderMenuRequest, ProviderResult
 
@@ -30,9 +31,19 @@ class ProviderNormalizationError(Exception):
         self.raw_response = raw_response
 
 
-class ProviderAdapter(Protocol):
+class ProviderAdapter(ABC):
     provider_id: str
 
+    def expected_variants_per_meal(self, meal_type: str) -> int | None:
+        """Expected dish-variant count for a meal type, or None to skip the check.
+
+        Providers whose feed contractually offers a fixed number of dish
+        variants (one per diet plan) per meal type should override this.
+        Defaults to no check, for providers that make no such guarantee.
+        """
+        return None
+
+    @abstractmethod
     def get_canonical_week_menu(
         self,
         request: ProviderMenuRequest,

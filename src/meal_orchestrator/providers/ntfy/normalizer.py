@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import date
 from typing import Any
 
@@ -25,15 +26,6 @@ _MEAL_TYPE_KEY_MAP: dict[str, str] = {
     "SNACK": "snack",
 }
 
-# ntfy contractually offers a fixed number of dish variants (one per diet
-# plan) for each meal type, every day. Anything else means data is missing or
-# misgrouped upstream and must not be delivered to the user silently.
-# SNACK only ever offers 2 diet-plan variants; every other meal type offers 3.
-_DEFAULT_VARIANTS_PER_MEAL = 3
-_VARIANTS_PER_MEAL_OVERRIDES: dict[str, int] = {
-    "snack": 2,
-}
-
 
 def normalize_ntfy_week(
     raw_days: list[dict[str, Any]],
@@ -42,6 +34,7 @@ def normalize_ntfy_week(
     week_end: date,
     user_id: str,
     purchased_meals: list[PurchasedMeal],
+    expected_variants_per_meal: Callable[[str], int | None] = lambda _meal_type: None,
 ) -> CanonicalMenu:
     """Transform a list of raw ntfy daily payloads into a CanonicalMenu.
 
@@ -55,7 +48,7 @@ def normalize_ntfy_week(
         if day_date < week_start or day_date > week_end:
             continue
 
-        canonical_meals = _normalize_day(raw_day, purchased_meals)
+        canonical_meals = _normalize_day(raw_day, purchased_meals, expected_variants_per_meal)
         if canonical_meals:
             days.append(CanonicalDay(date=day_date, meals=canonical_meals))
 
@@ -71,6 +64,7 @@ def normalize_ntfy_week(
 def _normalize_day(
     raw_day: dict[str, Any],
     purchased_meals: list[PurchasedMeal],
+    expected_variants_per_meal: Callable[[str], int | None],
 ) -> list[CanonicalMeal]:
     includes = raw_day.get("includes") or {}
     results = raw_day.get("results") or []
@@ -120,8 +114,8 @@ def _normalize_day(
         if not dishes:
             continue
 
-        expected = _VARIANTS_PER_MEAL_OVERRIDES.get(pm.type, _DEFAULT_VARIANTS_PER_MEAL)
-        if len(dishes) != expected:
+        expected = expected_variants_per_meal(pm.type)
+        if expected is not None and len(dishes) != expected:
             raise ValueError(
                 f"ntfy: expected {expected} dishes for meal type "
                 f"{pm.type!r}, got {len(dishes)}"
