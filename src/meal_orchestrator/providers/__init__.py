@@ -6,7 +6,16 @@ from meal_orchestrator.domain import ProviderMenuRequest, ProviderResult
 
 
 class MenuUnavailableError(RuntimeError):
-    pass
+    """Raised when the provider menu isn't published yet.
+
+    May carry raw_response when the failure occurs after raw data was
+    fetched (e.g. a purchased size missing from an otherwise valid
+    response), so callers can persist it for debugging.
+    """
+
+    def __init__(self, message: str, raw_response: Any = None) -> None:
+        super().__init__(message)
+        self.raw_response = raw_response
 
 
 class ProviderNormalizationError(Exception):

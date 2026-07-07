@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from meal_orchestrator.domain import ProviderMenuRequest, ProviderResult
-from meal_orchestrator.providers import ProviderNormalizationError
+from meal_orchestrator.providers import MenuUnavailableError, ProviderNormalizationError
 
 from .client import NtfyClient
 from .normalizer import normalize_ntfy_week
@@ -30,4 +30,7 @@ class NtfyProviderAdapter:
             )
         except ValueError as exc:
             raise ProviderNormalizationError(str(exc), raw_response=raw_days) from exc
+        except MenuUnavailableError as exc:
+            exc.raw_response = raw_days
+            raise
         return ProviderResult(menu=menu, raw_response=raw_days)
