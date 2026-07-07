@@ -8,15 +8,21 @@ import pytest
 
 from meal_orchestrator.domain import PurchasedMeal
 from meal_orchestrator.providers import MenuUnavailableError
-from meal_orchestrator.providers.ntfy.normalizer import normalize_ntfy_week
+from meal_orchestrator.providers.ntfy.normalizer import (
+    _DEFAULT_VARIANTS_PER_MEAL,
+    _MEAL_TYPE_KEY_MAP,
+    _VARIANTS_PER_MEAL_OVERRIDES,
+    normalize_ntfy_week,
+)
 
 _FIXTURE_DIR = Path("tests/fixtures/ntfy")
 
 _WEEK_START = date(2026, 6, 29)
 _WEEK_END = date(2026, 7, 3)
 
-# ntfy always offers exactly 3 dish options (one per diet plan) per meal type.
-_VARIANTS_PER_MEAL = 3
+# ntfy always offers a fixed number of dish options (one per diet plan) per
+# meal type; see _VARIANTS_PER_MEAL_OVERRIDES for the SNACK exception.
+_VARIANTS_PER_MEAL = _DEFAULT_VARIANTS_PER_MEAL
 
 # Minimal inline raw_day payloads used for targeted unit tests.
 _MEAL_TYPE_BREAKFAST = {
@@ -178,7 +184,7 @@ class TestNormalizeMealTypeFiltering:
             provider_id="ntfy",
             week_start=_WEEK_START,
             week_end=_WEEK_END,
-            user_id="alan",
+            user_id="example",
             purchased_meals=[PurchasedMeal(type="breakfast", size="M")],
         )
 
@@ -194,7 +200,7 @@ class TestNormalizeMealTypeFiltering:
             provider_id="ntfy",
             week_start=_WEEK_START,
             week_end=_WEEK_END,
-            user_id="alan",
+            user_id="example",
             purchased_meals=[
                 PurchasedMeal(type="breakfast", size="M"),
                 PurchasedMeal(type="lunch", size="XL"),
@@ -226,8 +232,10 @@ class TestNormalizeMealTypeFiltering:
             for mt, p, _size in meal_type_specs
         ]
         for mt, _p, size in meal_type_specs:
+            canonical = _MEAL_TYPE_KEY_MAP[mt["meal_name"]["key"]]
+            filler_count = _VARIANTS_PER_MEAL_OVERRIDES.get(canonical, _VARIANTS_PER_MEAL) - 1
             filler_products, filler_results = _filler_dishes(
-                mt_id=mt["id"], size=size, count=2, id_start=1000 + mt["id"] * 10
+                mt_id=mt["id"], size=size, count=filler_count, id_start=1000 + mt["id"] * 10
             )
             products.extend(filler_products)
             results.extend(filler_results)
@@ -242,7 +250,7 @@ class TestNormalizeMealTypeFiltering:
             provider_id="ntfy",
             week_start=_WEEK_START,
             week_end=_WEEK_END,
-            user_id="alan",
+            user_id="example",
             purchased_meals=[
                 PurchasedMeal(type="breakfast", size="M"),
                 PurchasedMeal(type="second_breakfast", size="S"),
@@ -262,7 +270,7 @@ class TestNormalizeMealTypeFiltering:
             provider_id="ntfy",
             week_start=_WEEK_START,
             week_end=_WEEK_END,
-            user_id="alan",
+            user_id="example",
             purchased_meals=[PurchasedMeal(type="lunch", size="XL")],
         )
 
@@ -277,7 +285,7 @@ class TestNormalizeSizeFiltering:
             provider_id="ntfy",
             week_start=_WEEK_START,
             week_end=_WEEK_END,
-            user_id="alan",
+            user_id="example",
             purchased_meals=[PurchasedMeal(type="breakfast", size="M")],
         )
 
@@ -293,7 +301,7 @@ class TestNormalizeSizeFiltering:
                 provider_id="ntfy",
                 week_start=_WEEK_START,
                 week_end=_WEEK_END,
-                user_id="alan",
+                user_id="example",
                 purchased_meals=[PurchasedMeal(type="breakfast", size="XXL")],
             )
 
@@ -335,7 +343,7 @@ class TestNormalizeSizeFiltering:
             provider_id="ntfy",
             week_start=_WEEK_START,
             week_end=_WEEK_END,
-            user_id="alan",
+            user_id="example",
             purchased_meals=[PurchasedMeal(type="lunch", size="XL")],
         )
 
@@ -376,7 +384,7 @@ class TestNormalizeVariants:
             provider_id="ntfy",
             week_start=_WEEK_START,
             week_end=_WEEK_END,
-            user_id="alan",
+            user_id="example",
             purchased_meals=[PurchasedMeal(type="breakfast", size="M")],
         )
 
@@ -390,7 +398,7 @@ class TestNormalizeVariants:
             provider_id="ntfy",
             week_start=_WEEK_START,
             week_end=_WEEK_END,
-            user_id="alan",
+            user_id="example",
             purchased_meals=[PurchasedMeal(type="breakfast", size="M")],
         )
 
@@ -428,7 +436,7 @@ class TestNormalizeVariants:
             provider_id="ntfy",
             week_start=_WEEK_START,
             week_end=_WEEK_END,
-            user_id="alan",
+            user_id="example",
             purchased_meals=[PurchasedMeal(type="breakfast", size="M")],
         )
 
@@ -466,7 +474,7 @@ class TestNormalizeVariants:
             provider_id="ntfy",
             week_start=_WEEK_START,
             week_end=_WEEK_END,
-            user_id="alan",
+            user_id="example",
             purchased_meals=[PurchasedMeal(type="breakfast", size="M")],
         )
 
@@ -488,7 +496,7 @@ class TestNormalizeDayFiltering:
             provider_id="ntfy",
             week_start=date(2026, 6, 29),
             week_end=date(2026, 7, 3),
-            user_id="alan",
+            user_id="example",
             purchased_meals=[PurchasedMeal(type="breakfast", size="M")],
         )
 
@@ -501,7 +509,7 @@ class TestNormalizeDayFiltering:
             provider_id="ntfy",
             week_start=_WEEK_START,
             week_end=_WEEK_END,
-            user_id="alan",
+            user_id="example",
             purchased_meals=[PurchasedMeal(type="snack", size="S")],
         )
 
@@ -529,7 +537,7 @@ class TestNormalizeErrorCases:
                 provider_id="ntfy",
                 week_start=_WEEK_START,
                 week_end=_WEEK_END,
-                user_id="alan",
+                user_id="example",
                 purchased_meals=[PurchasedMeal(type="breakfast", size="M")],
             )
 
@@ -553,7 +561,7 @@ class TestNormalizeErrorCases:
             provider_id="ntfy",
             week_start=_WEEK_START,
             week_end=_WEEK_END,
-            user_id="alan",
+            user_id="example",
             purchased_meals=[PurchasedMeal(type="breakfast", size="M")],
         )
 
@@ -582,7 +590,7 @@ class TestNormalizeErrorCases:
                 provider_id="ntfy",
                 week_start=_WEEK_START,
                 week_end=_WEEK_END,
-                user_id="alan",
+                user_id="example",
                 purchased_meals=[PurchasedMeal(type="breakfast", size="M")],
             )
 
@@ -594,7 +602,7 @@ class TestNormalizeCanonicalShape:
             provider_id="ntfy",
             week_start=date(2026, 6, 29),
             week_end=date(2026, 7, 3),
-            user_id="alan",
+            user_id="example",
             purchased_meals=[PurchasedMeal(type="breakfast", size="M")],
         )
 
@@ -602,7 +610,7 @@ class TestNormalizeCanonicalShape:
         assert payload["provider"] == "ntfy"
         assert payload["week_start"] == "2026-06-29"
         assert payload["week_end"] == "2026-07-03"
-        assert payload["user"] == {"id": "alan"}
+        assert payload["user"] == {"id": "example"}
 
 
 class TestNormalizeWithRealFixtures:
@@ -619,7 +627,7 @@ class TestNormalizeWithRealFixtures:
             provider_id="ntfy",
             week_start=date(2026, 6, 29),
             week_end=date(2026, 7, 3),
-            user_id="alan",
+            user_id="example",
             purchased_meals=[
                 PurchasedMeal(type="breakfast", size="M"),
                 PurchasedMeal(type="lunch", size="XL"),
@@ -647,7 +655,7 @@ class TestNormalizeWithRealFixtures:
             provider_id="ntfy",
             week_start=date(2026, 6, 29),
             week_end=date(2026, 7, 3),
-            user_id="alan",
+            user_id="example",
             purchased_meals=[
                 PurchasedMeal(type="breakfast", size="M"),
                 PurchasedMeal(type="lunch", size="XL"),
@@ -666,7 +674,7 @@ class TestNormalizeWithRealFixtures:
             provider_id="ntfy",
             week_start=date(2026, 6, 29),
             week_end=date(2026, 7, 3),
-            user_id="alan",
+            user_id="example",
             purchased_meals=[
                 PurchasedMeal(type="breakfast", size="M"),
                 PurchasedMeal(type="lunch", size="XL"),
@@ -725,7 +733,7 @@ class TestNormalizeWithRealFixtures:
             provider_id="ntfy",
             week_start=date(2026, 6, 29),
             week_end=date(2026, 7, 3),
-            user_id="alan",
+            user_id="example",
             purchased_meals=[
                 PurchasedMeal(type="breakfast", size="M"),
                 PurchasedMeal(type="lunch", size="XL"),
@@ -734,3 +742,25 @@ class TestNormalizeWithRealFixtures:
 
         for meal in menu.to_compact_dict()["days"][0]["meals"]:
             assert len(meal["variants"]) == 3, f"{meal['type']} should have 3 variants"
+
+    @pytest.mark.parametrize(
+        "fixture_date",
+        ["2026-06-29", "2026-06-30", "2026-07-01", "2026-07-02", "2026-07-03"],
+    )
+    def test_fixture_snack_has_two_variants(self, fixture_date: str) -> None:
+        # SNACK is the one ntfy meal type that only ever offers 2 diet-plan
+        # variants (every other meal type offers 3); every real fixture in
+        # this repo confirms this. Purchasing snack must not raise.
+        menu = normalize_ntfy_week(
+            raw_days=[_load_fixture_raw_day(fixture_date)],
+            provider_id="ntfy",
+            week_start=date(2026, 6, 29),
+            week_end=date(2026, 7, 3),
+            user_id="example",
+            purchased_meals=[PurchasedMeal(type="snack", size="S")],
+        )
+
+        snack = next(
+            m for m in menu.to_compact_dict()["days"][0]["meals"] if m["type"] == "snack"
+        )
+        assert len(snack["variants"]) == 2

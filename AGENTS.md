@@ -9,6 +9,9 @@ Implement only what is required for the current task.
 
 Avoid speculative abstractions and future-proofing unless explicitly requested.
 
+Use `"example"` as the placeholder user id/name in tests and fixtures, not a
+real person's name.
+
 After completing a task, check whether `README.md` still accurately describes
 the project. Update it if the change is user-visible; skip it for internal
 changes that don't affect the described behaviour or usage.

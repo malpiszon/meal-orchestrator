@@ -79,7 +79,7 @@ def _request(*, size: str) -> ProviderMenuRequest:
         week_start=_WEEK_START,
         week_end=_WEEK_END,
         provider_offering_id=6,
-        user_id="alan",
+        user_id="example",
         purchased_meals=[PurchasedMeal(type="breakfast", size=size)],
     )
 

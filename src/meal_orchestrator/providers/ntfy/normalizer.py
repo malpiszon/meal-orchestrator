@@ -25,10 +25,14 @@ _MEAL_TYPE_KEY_MAP: dict[str, str] = {
     "SNACK": "snack",
 }
 
-# ntfy contractually offers exactly 3 dish variants (one per diet plan) for
-# every meal type, every day. Anything else means data is missing or
+# ntfy contractually offers a fixed number of dish variants (one per diet
+# plan) for each meal type, every day. Anything else means data is missing or
 # misgrouped upstream and must not be delivered to the user silently.
-_VARIANTS_PER_MEAL = 3
+# SNACK only ever offers 2 diet-plan variants; every other meal type offers 3.
+_DEFAULT_VARIANTS_PER_MEAL = 3
+_VARIANTS_PER_MEAL_OVERRIDES: dict[str, int] = {
+    "snack": 2,
+}
 
 
 def normalize_ntfy_week(
@@ -116,9 +120,10 @@ def _normalize_day(
         if not dishes:
             continue
 
-        if len(dishes) != _VARIANTS_PER_MEAL:
+        expected = _VARIANTS_PER_MEAL_OVERRIDES.get(pm.type, _DEFAULT_VARIANTS_PER_MEAL)
+        if len(dishes) != expected:
             raise ValueError(
-                f"ntfy: expected {_VARIANTS_PER_MEAL} dishes for meal type "
+                f"ntfy: expected {expected} dishes for meal type "
                 f"{pm.type!r}, got {len(dishes)}"
             )
 
