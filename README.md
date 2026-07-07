@@ -154,9 +154,11 @@ auto-generated notes.
 1. Add a `providers/<name>/` package with a client (raw HTTP fetch, with
    retry for transient failures) and a normalizer (raw response -> canonical
    menu).
-2. Implement a class matching the `ProviderAdapter` protocol in
+2. Implement a class extending the `ProviderAdapter` base class in
    `providers/__init__.py`: a `provider_id` attribute and
-   `get_canonical_week_menu(request) -> ProviderResult`.
+   `get_canonical_week_menu(request) -> ProviderResult`. Optionally override
+   `expected_variants_per_meal(meal_type)` if the provider guarantees a fixed
+   dish-variant count per meal type (default: no check).
 3. Raise `MenuUnavailableError` for expected non-availability (e.g. the
    provider hasn't published a given week/size yet) and
    `ProviderNormalizationError` for malformed/unexpected data — these are

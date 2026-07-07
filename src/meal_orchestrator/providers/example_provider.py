@@ -14,6 +14,7 @@ from meal_orchestrator.domain import (
     ProviderResult,
     PurchasedMeal,
 )
+from meal_orchestrator.providers import ProviderAdapter
 
 NUTRITION_FIELDS = {
     "protein_g",
@@ -26,7 +27,7 @@ NUTRITION_FIELDS = {
 }
 
 
-class ExampleProviderAdapter:
+class ExampleProviderAdapter(ProviderAdapter):
     provider_id = "example_provider"
 
     def get_canonical_week_menu(

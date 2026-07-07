@@ -84,6 +84,14 @@ def _request(*, size: str) -> ProviderMenuRequest:
     )
 
 
+def test_expected_variants_per_meal_uses_snack_override() -> None:
+    adapter = NtfyProviderAdapter()
+
+    assert adapter.expected_variants_per_meal("snack") == 2
+    assert adapter.expected_variants_per_meal("breakfast") == 3
+    assert adapter.expected_variants_per_meal("unknown_meal_type") == 3
+
+
 def test_adapter_propagates_menu_unavailable_uncaught(monkeypatch) -> None:
     """A purchased size that isn't published yet must surface as MenuUnavailableError,
 
