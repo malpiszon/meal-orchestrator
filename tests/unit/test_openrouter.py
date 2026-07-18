@@ -7,7 +7,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from meal_orchestrator.domain import LlmRequest, PromptPayload
-from meal_orchestrator.llm.openrouter import OpenRouterClient
+from meal_orchestrator.llm.openrouter import (
+    EmptyLlmResponseError,
+    OpenRouterClient,
+    OpenRouterHttpError,
+    OpenRouterResponseError,
+)
 from meal_orchestrator.retries import RetryError
 from tests.unit.helpers import canonical_menu
 
@@ -20,12 +25,52 @@ def _make_request(model: str = "openai/gpt-4o-mini") -> LlmRequest:
     )
 
 
-def _mock_response(text: str, model: str = "openai/gpt-4o-mini") -> bytes:
+def _mock_response(
+    text: str | None,
+    model: str = "openai/gpt-4o-mini",
+    openrouter_metadata: dict | None = None,
+) -> bytes:
+    response = {
+        "model": model,
+        "choices": [{"message": {"content": text}}],
+        "usage": {"prompt_tokens": 100, "completion_tokens": 50},
+    }
+    if openrouter_metadata is not None:
+        response["openrouter_metadata"] = openrouter_metadata
+    return json.dumps(response).encode("utf-8")
+
+
+def _mock_empty_response() -> bytes:
     return json.dumps(
         {
-            "model": model,
-            "choices": [{"message": {"content": text}}],
+            "id": "gen-example",
+            "model": "openai/gpt-4o-mini",
+            "provider": "Example Provider",
+            "choices": [
+                {
+                    "message": {"content": None},
+                    "finish_reason": "error",
+                    "native_finish_reason": "provider_timeout",
+                    "error": {"code": 504, "message": "Provider timed out"},
+                }
+            ],
             "usage": {"prompt_tokens": 100, "completion_tokens": 50},
+            "openrouter_metadata": {"attempt": 1},
+        }
+    ).encode("utf-8")
+
+
+def _mock_partial_response(finish_reason: str) -> bytes:
+    return json.dumps(
+        {
+            "id": "gen-example",
+            "model": "openai/gpt-4o-mini",
+            "choices": [
+                {
+                    "message": {"content": "Partial meal plan"},
+                    "finish_reason": finish_reason,
+                }
+            ],
         }
     ).encode("utf-8")
 
@@ -65,6 +110,60 @@ class TestOpenRouterClientGenerate:
 
         assert result.token_usage == {"prompt_tokens": 100, "completion_tokens": 50}
 
+    def test_returns_response_metadata(self) -> None:
+        routing_metadata = {
+            "requested": "openai/gpt-4o-mini",
+            "strategy": "direct",
+            "region": "WAW",
+            "summary": "available=2, selected=OpenAI",
+            "attempt": 1,
+            "is_byok": False,
+            "endpoints": {
+                "total": 3,
+                "available": [
+                    {
+                        "provider": "OpenAI",
+                        "model": "openai/gpt-4o-mini-2025-08-07",
+                        "selected": True,
+                    },
+                    {
+                        "provider": "Azure",
+                        "model": "openai/gpt-4o-mini-2025-08-07",
+                        "selected": False,
+                    },
+                ],
+            },
+        }
+        with patch(
+            "urllib.request.urlopen",
+            return_value=_mock_urlopen(_mock_response("ok", openrouter_metadata=routing_metadata)),
+        ):
+            client = OpenRouterClient(api_key="test-key")
+            result = client.generate(_make_request())
+
+        assert result.response_metadata == {
+            "attempt": 1,
+            "generation_id": None,
+            "model": "openai/gpt-4o-mini",
+            "provider": None,
+            "finish_reason": None,
+            "native_finish_reason": None,
+            "response_error": None,
+            "choice_error": None,
+            "usage": {"prompt_tokens": 100, "completion_tokens": 50},
+            "openrouter_metadata": {
+                "requested": "openai/gpt-4o-mini",
+                "strategy": "direct",
+                "region": "WAW",
+                "summary": "available=2, selected=OpenAI",
+                "attempt": 1,
+                "is_byok": False,
+                "selected_endpoints": [
+                    {"provider": "OpenAI", "model": "openai/gpt-4o-mini-2025-08-07"}
+                ],
+            },
+        }
+
     def test_sends_bearer_token(self) -> None:
         captured = {}
 
@@ -77,6 +176,19 @@ class TestOpenRouterClientGenerate:
             client.generate(_make_request())
 
         assert captured["auth"] == "Bearer secret-key"
+
+    def test_requests_openrouter_routing_metadata(self) -> None:
+        captured = {}
+
+        def side_effect(req, timeout=None):
+            captured["metadata"] = req.get_header("X-openrouter-experimental-metadata")
+            return _mock_urlopen(_mock_response("ok"))
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            client = OpenRouterClient(api_key="test-key")
+            client.generate(_make_request())
+
+        assert captured["metadata"] == "enabled"
 
     def test_sends_model_in_request_body(self) -> None:
         captured = {}
@@ -155,6 +267,96 @@ class TestOpenRouterClientGenerate:
                 client = OpenRouterClient(api_key="test-key", max_retries=3)
                 with pytest.raises(RetryError):
                     client.generate(_make_request())
+
+    def test_retries_when_response_has_no_text_and_eventually_succeeds(self) -> None:
+        call_count = 0
+
+        def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _mock_urlopen(_mock_response(None))
+            return _mock_urlopen(_mock_response("ok"))
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            with patch("time.sleep"):
+                client = OpenRouterClient(api_key="test-key", max_retries=3)
+                result = client.generate(_make_request())
+
+        assert call_count == 2
+        assert result.text == "ok"
+
+    def test_raises_retry_error_when_response_has_no_text_after_all_attempts(self) -> None:
+        with patch("urllib.request.urlopen", return_value=_mock_urlopen(_mock_empty_response())):
+            with patch("time.sleep"):
+                client = OpenRouterClient(api_key="test-key", max_retries=3)
+                with pytest.raises(RetryError) as exc_info:
+                    client.generate(_make_request())
+
+        assert isinstance(exc_info.value.last_exception, EmptyLlmResponseError)
+        details = exc_info.value.last_exception.details
+        assert details.to_metadata() == {
+            "reason": "empty_message_content",
+            "http_status": None,
+            "attempt": 3,
+            "generation_id": "gen-example",
+            "model": "openai/gpt-4o-mini",
+            "provider": "Example Provider",
+            "finish_reason": "error",
+            "native_finish_reason": "provider_timeout",
+            "response_error": None,
+            "choice_error": {"code": 504, "message": "Provider timed out"},
+            "usage": {"prompt_tokens": 100, "completion_tokens": 50},
+            "openrouter_metadata": {"attempt": 1},
+        }
+
+    def test_retries_when_response_ends_with_error_after_partial_content(self) -> None:
+        with patch(
+            "urllib.request.urlopen", return_value=_mock_urlopen(_mock_partial_response("error"))
+        ) as urlopen:
+            with patch("time.sleep"):
+                client = OpenRouterClient(api_key="test-key", max_retries=3)
+                with pytest.raises(RetryError) as exc_info:
+                    client.generate(_make_request())
+
+        assert urlopen.call_count == 3
+        assert isinstance(exc_info.value.last_exception, OpenRouterResponseError)
+        assert exc_info.value.last_exception.details.reason == "finish_reason_error"
+
+    @pytest.mark.parametrize("finish_reason", ["content_filter", "length"])
+    def test_rejects_partial_response_with_non_retryable_finish_reason(
+        self, finish_reason: str
+    ) -> None:
+        with patch(
+            "urllib.request.urlopen",
+            return_value=_mock_urlopen(_mock_partial_response(finish_reason)),
+        ) as urlopen:
+            client = OpenRouterClient(api_key="test-key", max_retries=3)
+            with pytest.raises(OpenRouterResponseError) as exc_info:
+                client.generate(_make_request())
+
+        assert urlopen.call_count == 1
+        assert exc_info.value.details.reason == f"finish_reason_{finish_reason}"
+
+    def test_preserves_structured_http_error_details(self) -> None:
+        http_error = urllib.error.HTTPError(
+            url="https://openrouter.ai", code=429, msg="Too Many Requests", hdrs={}, fp=None  # type: ignore[arg-type]
+        )
+        http_error.response_body = json.dumps(
+            {"error": {"code": 429, "message": "Rate limit exceeded"}}
+        )
+
+        with patch("meal_orchestrator.llm.openrouter.post_json", side_effect=http_error):
+            with patch("time.sleep"):
+                client = OpenRouterClient(api_key="test-key", max_retries=2)
+                with pytest.raises(RetryError) as exc_info:
+                    client.generate(_make_request())
+
+        assert isinstance(exc_info.value.last_exception, OpenRouterHttpError)
+        assert exc_info.value.last_exception.details.to_metadata()["response_error"] == {
+            "code": 429,
+            "message": "Rate limit exceeded",
+        }
 
     def test_non_retryable_error_raised_immediately(self) -> None:
         http_401 = urllib.error.HTTPError(

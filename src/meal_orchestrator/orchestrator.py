@@ -126,7 +126,10 @@ class RunOrchestrator:
                     },
                 )
                 result = WorkflowResult(
-                    user_id=user.id, status=WorkflowStatus.FAILED, detail=str(exc)
+                    user_id=user.id,
+                    status=WorkflowStatus.FAILED,
+                    detail=str(exc),
+                    failed_step="setup",
                 )
 
             ops_webhook = self.app_config.delivery.operational_discord_webhook_env
@@ -186,10 +189,14 @@ def _build_ops_message(
             description=f"Menu unavailable for user {user_id} (run {run_id}): {detail}",
             color=COLOR_WARNING,
         )
+    failed_step = result.failed_step or "unknown"
     return DiscordMessage(
         webhook_env=webhook_env,
         title="Workflow failed",
-        description=f"Workflow failed for user {user_id} (run {run_id}): {result.detail or 'unknown error'}",  # noqa: E501
+        description=(
+            f"Workflow failed for user {user_id} (run {run_id}) at step {failed_step}: "
+            f"{result.detail or 'unknown error'}"
+        ),
         color=COLOR_ERROR,
     )
 

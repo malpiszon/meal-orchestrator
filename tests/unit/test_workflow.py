@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
@@ -14,7 +15,9 @@ from meal_orchestrator.domain import (
     RunContext,
     WorkflowStatus,
 )
+from meal_orchestrator.llm import EmptyLlmResponseError, LlmFailureDetails
 from meal_orchestrator.providers import ProviderNormalizationError
+from meal_orchestrator.retries import RetryError
 from meal_orchestrator.workflow import UserWorkflowExecutor
 from tests.unit.helpers import (
     FakeDiscordClient,
@@ -55,7 +58,29 @@ class FakeLlmClient:
 
     def generate(self, request):
         self.requests.append(request)
-        return LlmResult(text="Generated meal plan", model=request.model)
+        return LlmResult(
+            text="Generated meal plan",
+            model=request.model,
+            response_metadata={"generation_id": "gen-example"},
+        )
+
+
+class FailingLlmClient:
+    def generate(self, request):
+        raise RetryError(
+            "openrouter failed after 3 attempt(s)",
+            EmptyLlmResponseError(
+                LlmFailureDetails(
+                    reason="empty_message_content",
+                    attempt=3,
+                    response={
+                        "id": "gen-example",
+                        "model": request.model,
+                        "choices": [{"message": {"content": None}}],
+                    },
+                )
+            ),
+        )
 
 
 def test_dry_run_calls_llm_with_dry_run_model_but_skips_delivery(tmp_path) -> None:
@@ -155,6 +180,7 @@ def test_artifacts_written_on_successful_run(tmp_path: Path) -> None:
     assert metadata["status"] == "completed"
     assert metadata["user_id"] == "alan"
     assert metadata["app_version"] == __version__
+    assert metadata["llm_response"] == {"generation_id": "gen-example"}
 
 
 def test_llm_artifacts_saved_on_dry_run(tmp_path: Path) -> None:
@@ -199,6 +225,29 @@ def test_metadata_written_on_failed_run(tmp_path: Path) -> None:
     assert (run_dir / "canonical_menu.json").exists()
     metadata = json.loads((run_dir / "metadata.json").read_text())
     assert metadata["status"] == "menu_unavailable"
+
+
+def test_llm_failure_skips_delivery_and_records_failed_step(tmp_path: Path) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    artifacts_dir = tmp_path / "artifacts"
+    store = ArtifactStore(
+        ArtifactConfig(path=artifacts_dir, retention_days=14, max_runs_per_user=10)
+    )
+    email = FakeEmailClient()
+
+    user = replace(user_config(prompt_file.relative_to(tmp_path)), id="example")
+    result = _executor(
+        tmp_path, FakeProvider(), FailingLlmClient(), email, FakeDiscordClient(), store
+    ).execute(user, _context(dry_run=False))
+
+    assert result.status == WorkflowStatus.FAILED
+    assert result.failed_step == "llm"
+    assert email.messages == []
+    metadata = json.loads((artifacts_dir / "example" / "run-1" / "metadata.json").read_text())
+    assert metadata["failed_step"] == "llm"
+    assert metadata["llm_failure"]["generation_id"] == "gen-example"
+    assert not (artifacts_dir / "example" / "run-1" / "llm_failure.json").exists()
 
 
 def test_discord_skipped_when_discord_user_id_is_none(tmp_path) -> None:

@@ -67,6 +67,15 @@ def test_artifacts_content(tmp_path: Path) -> None:
     assert "days" in req["menu"]
 
 
+def test_skips_llm_response_artifact_when_text_is_not_a_string(tmp_path: Path) -> None:
+    store = ArtifactStore(_config(tmp_path))
+    run = store.for_run("run-1", "example")
+
+    run.save_llm_response(LlmResult(text=None, model="test-model"))  # type: ignore[arg-type]
+
+    assert not (tmp_path / "artifacts" / "example" / "run-1" / "llm_response.txt").exists()
+
+
 def test_noop_when_no_config(tmp_path: Path) -> None:
     store = ArtifactStore(None)
     run = store.for_run("run-1", "alan")

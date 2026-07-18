@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import urllib.error
+from dataclasses import dataclass
 from typing import Any
 
 from meal_orchestrator import APP_NAME
@@ -15,6 +17,47 @@ logger = logging.getLogger(__name__)
 _API_URL = "https://openrouter.ai/api/v1/chat/completions"
 _BASE_DELAY = 1.0
 _BACKOFF_FACTOR = 2.0
+
+
+@dataclass(frozen=True)
+class LlmFailureDetails:
+    """Diagnostic data returned with an unusable OpenRouter completion."""
+
+    reason: str
+    attempt: int
+    response: Any
+    http_status: int | None = None
+
+    def to_metadata(self) -> dict[str, Any]:
+        return {
+            "reason": self.reason,
+            "http_status": self.http_status,
+            **_response_metadata(self.response, self.attempt),
+        }
+
+
+class OpenRouterResponseError(RuntimeError):
+    """Raised when OpenRouter returns an unusable completion response."""
+
+    def __init__(self, details: LlmFailureDetails, *, retryable: bool) -> None:
+        super().__init__(_failure_message(details))
+        self.details = details
+        self.retryable = retryable
+
+
+class EmptyLlmResponseError(OpenRouterResponseError):
+    """Raised when OpenRouter returns a completion without usable text."""
+
+    def __init__(self, details: LlmFailureDetails) -> None:
+        super().__init__(details, retryable=True)
+
+
+class OpenRouterHttpError(urllib.error.HTTPError):
+    """HTTP error carrying the parsed OpenRouter failure details."""
+
+    def __init__(self, error: urllib.error.HTTPError, details: LlmFailureDetails) -> None:
+        super().__init__(error.url, error.code, error.reason, error.headers, None)
+        self.details = details
 
 
 def _build_message_content(payload: PromptPayload) -> list[dict[str, str]]:
@@ -50,24 +93,32 @@ class OpenRouterClient:
             "Content-Type": "application/json",
             "HTTP-Referer": "https://github.com/malpiszon/meal-orchestrator",
             "X-OpenRouter-Title": APP_NAME,
+            "X-OpenRouter-Experimental-Metadata": "enabled",
         }
+        attempt = 0
 
-        def _call() -> dict[str, Any]:
-            raw = post_json(
-                _API_URL, headers=headers, body=body, timeout_seconds=request.timeout_seconds
-            )
-            return json.loads(raw.decode("utf-8"))
+        def _call() -> tuple[dict[str, Any], str]:
+            nonlocal attempt
+            attempt += 1
+            try:
+                raw = post_json(
+                    _API_URL, headers=headers, body=body, timeout_seconds=request.timeout_seconds
+                )
+            except urllib.error.HTTPError as exc:
+                raise _openrouter_http_error(exc, attempt) from exc
+            response = json.loads(raw.decode("utf-8"))
+            return response, _response_text(response, attempt)
 
-        response = with_retries(
+        response, text = with_retries(
             _call,
             max_attempts=self._max_retries,
             base_delay_seconds=_BASE_DELAY,
             backoff_factor=_BACKOFF_FACTOR,
-            retryable=is_transient_http_error,
+            retryable=lambda exc: is_transient_http_error(exc)
+            or (isinstance(exc, OpenRouterResponseError) and exc.retryable),
             operation_name=f"openrouter generate model={request.model}",
         )
 
-        text = response["choices"][0]["message"]["content"]
         usage = response.get("usage")
         token_usage = None
         if usage:
@@ -78,4 +129,125 @@ class OpenRouterClient:
         model = response.get("model", request.model)
 
         logger.info("openrouter: model=%s tokens=%s", model, token_usage)
-        return LlmResult(text=text, model=model, token_usage=token_usage)
+        return LlmResult(
+            text=text,
+            model=model,
+            token_usage=token_usage,
+            response_metadata=_response_metadata(response, attempt, compact_routing_metadata=True),
+        )
+
+
+def _response_text(response: Any, attempt: int) -> str:
+    try:
+        text = response["choices"][0]["message"]["content"]
+    except (IndexError, KeyError, TypeError) as exc:
+        raise _empty_response_error("missing_message_content", attempt, response) from exc
+    if not isinstance(text, str) or not text.strip():
+        raise _empty_response_error("empty_message_content", attempt, response)
+    choice = _first_choice(response) if isinstance(response, dict) else {}
+    finish_reason = choice.get("finish_reason")
+    if finish_reason in {"content_filter", "error", "length"}:
+        raise OpenRouterResponseError(
+            LlmFailureDetails(
+                reason=f"finish_reason_{finish_reason}",
+                attempt=attempt,
+                response=response,
+            ),
+            retryable=finish_reason == "error",
+        )
+    return text
+
+
+def _empty_response_error(reason: str, attempt: int, response: Any) -> EmptyLlmResponseError:
+    return EmptyLlmResponseError(
+        LlmFailureDetails(reason=reason, attempt=attempt, response=response)
+    )
+
+
+def _openrouter_http_error(
+    error: urllib.error.HTTPError, attempt: int
+) -> OpenRouterHttpError:
+    response_body = getattr(error, "response_body", "")
+    try:
+        response = json.loads(response_body)
+    except json.JSONDecodeError:
+        response = {"error": {"code": error.code, "message": response_body or error.reason}}
+    return OpenRouterHttpError(
+        error,
+        LlmFailureDetails(
+            reason="http_error",
+            attempt=attempt,
+            response=response,
+            http_status=error.code,
+        ),
+    )
+
+
+def _first_choice(response: dict[str, Any]) -> dict[str, Any]:
+    choices = response.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return {}
+    choice = choices[0]
+    return choice if isinstance(choice, dict) else {}
+
+
+def _response_metadata(
+    response: Any, attempt: int, *, compact_routing_metadata: bool = False
+) -> dict[str, Any]:
+    response = response if isinstance(response, dict) else {}
+    choice = _first_choice(response)
+    routing_metadata = response.get("openrouter_metadata")
+    if compact_routing_metadata:
+        routing_metadata = _compact_routing_metadata(routing_metadata)
+    return {
+        "attempt": attempt,
+        "generation_id": response.get("id"),
+        "model": response.get("model"),
+        "provider": response.get("provider"),
+        "finish_reason": choice.get("finish_reason"),
+        "native_finish_reason": choice.get("native_finish_reason"),
+        "response_error": response.get("error"),
+        "choice_error": choice.get("error"),
+        "usage": response.get("usage"),
+        "openrouter_metadata": routing_metadata,
+    }
+
+
+def _compact_routing_metadata(metadata: Any) -> Any:
+    if not isinstance(metadata, dict):
+        return metadata
+
+    compact = {
+        key: metadata[key]
+        for key in ("requested", "strategy", "region", "summary", "attempt", "is_byok")
+        if key in metadata
+    }
+    endpoints = metadata.get("endpoints")
+    if not isinstance(endpoints, dict):
+        return compact
+    available = endpoints.get("available")
+    if not isinstance(available, list):
+        return compact
+    selected_endpoints = [
+        {key: endpoint[key] for key in ("provider", "model") if key in endpoint}
+        for endpoint in available
+        if isinstance(endpoint, dict) and endpoint.get("selected")
+    ]
+    if selected_endpoints:
+        compact["selected_endpoints"] = selected_endpoints
+    return compact
+
+
+def _failure_message(details: LlmFailureDetails) -> str:
+    metadata = details.to_metadata()
+    context = ", ".join(
+        f"{key}={value}"
+        for key, value in (
+            ("finish_reason", metadata["finish_reason"]),
+            ("native_finish_reason", metadata["native_finish_reason"]),
+            ("generation_id", metadata["generation_id"]),
+        )
+        if value is not None
+    )
+    suffix = f" ({context})" if context else ""
+    return f"OpenRouter response has {details.reason.replace('_', ' ')}{suffix}"
