@@ -23,7 +23,7 @@ from meal_orchestrator.domain import (
     WorkflowResult,
     WorkflowStatus,
 )
-from meal_orchestrator.llm import OpenRouterClient
+from meal_orchestrator.llm import EmptyLlmResponseError, LlmFailureDetails, OpenRouterClient
 from meal_orchestrator.prompt_builder import build_prompt_payload
 from meal_orchestrator.providers import (
     MenuUnavailableError,
@@ -42,6 +42,8 @@ class _WorkflowState:
     token_usage: dict | None = None
     error: str | None = None
     failed_step: str = "provider"
+    llm_failure: LlmFailureDetails | None = None
+    llm_response: dict | None = None
 
 
 class UserWorkflowExecutor:
@@ -86,6 +88,7 @@ class UserWorkflowExecutor:
             llm_result = self._generate_plan(llm_request, artifacts, log_context)
             state.model = llm_result.model
             state.token_usage = llm_result.token_usage
+            state.llm_response = llm_result.response_metadata
 
             state.failed_step = "email"
             self._deliver_email(user, run_context, llm_result, log_context)
@@ -125,6 +128,7 @@ class UserWorkflowExecutor:
             )
         except Exception as exc:
             state.error = str(exc)
+            state.llm_failure = _llm_failure_details(exc)
             logger.error(
                 "user workflow failed",
                 exc_info=True,
@@ -314,6 +318,10 @@ class UserWorkflowExecutor:
             metadata["error"] = state.error
         if state.status == WorkflowStatus.FAILED:
             metadata["failed_step"] = state.failed_step
+        if state.llm_response is not None:
+            metadata["llm_response"] = state.llm_response
+        if state.llm_failure is not None:
+            metadata["llm_failure"] = state.llm_failure.to_metadata()
         artifacts.save_metadata(metadata)
 
 
@@ -352,3 +360,12 @@ def _ensure_complete_requested_menu(menu: CanonicalMenu, user: UserConfig) -> No
                     f"{purchased_meal.type} for requested date: {current.isoformat()}"
                 )
         current += timedelta(days=1)
+
+
+def _llm_failure_details(exc: Exception) -> LlmFailureDetails | None:
+    if isinstance(exc, EmptyLlmResponseError):
+        return exc.details
+    last_exception = getattr(exc, "last_exception", None)
+    if isinstance(last_exception, EmptyLlmResponseError):
+        return last_exception.details
+    return None

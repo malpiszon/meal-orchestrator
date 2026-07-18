@@ -15,6 +15,7 @@ from meal_orchestrator.domain import (
     RunContext,
     WorkflowStatus,
 )
+from meal_orchestrator.llm import EmptyLlmResponseError, LlmFailureDetails
 from meal_orchestrator.providers import ProviderNormalizationError
 from meal_orchestrator.retries import RetryError
 from meal_orchestrator.workflow import UserWorkflowExecutor
@@ -62,7 +63,20 @@ class FakeLlmClient:
 
 class FailingLlmClient:
     def generate(self, request):
-        raise RetryError("openrouter failed after 3 attempt(s)", RuntimeError("empty response"))
+        raise RetryError(
+            "openrouter failed after 3 attempt(s)",
+            EmptyLlmResponseError(
+                LlmFailureDetails(
+                    reason="empty_message_content",
+                    attempt=3,
+                    response={
+                        "id": "gen-example",
+                        "model": request.model,
+                        "choices": [{"message": {"content": None}}],
+                    },
+                )
+            ),
+        )
 
 
 def test_dry_run_calls_llm_with_dry_run_model_but_skips_delivery(tmp_path) -> None:
@@ -227,6 +241,8 @@ def test_llm_failure_skips_delivery_and_records_failed_step(tmp_path: Path) -> N
     assert email.messages == []
     metadata = json.loads((artifacts_dir / "example" / "run-1" / "metadata.json").read_text())
     assert metadata["failed_step"] == "llm"
+    assert metadata["llm_failure"]["generation_id"] == "gen-example"
+    assert not (artifacts_dir / "example" / "run-1" / "llm_failure.json").exists()
 
 
 def test_discord_skipped_when_discord_user_id_is_none(tmp_path) -> None:

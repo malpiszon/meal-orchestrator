@@ -128,6 +128,7 @@ class LlmResult:
     text: str
     model: str
     token_usage: dict[str, int] | None = None
+    response_metadata: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)

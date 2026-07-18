@@ -36,8 +36,8 @@ a status notification is sent instead of treating it as an error.
 - `--dry-run` mode that runs the full pipeline (including the LLM call)
   without sending email or Discord messages.
 - Per-run debug artifacts (raw provider response, canonical menu, LLM
-  request/response, run metadata including the failed step) with
-  retention-based cleanup.
+  request/response, run metadata including LLM diagnostics and the failed
+  step) with retention-based cleanup.
 - Structured JSON logging to stdout.
 
 ## Project structure
