@@ -25,14 +25,19 @@ def _make_request(model: str = "openai/gpt-4o-mini") -> LlmRequest:
     )
 
 
-def _mock_response(text: str | None, model: str = "openai/gpt-4o-mini") -> bytes:
-    return json.dumps(
-        {
-            "model": model,
-            "choices": [{"message": {"content": text}}],
-            "usage": {"prompt_tokens": 100, "completion_tokens": 50},
-        }
-    ).encode("utf-8")
+def _mock_response(
+    text: str | None,
+    model: str = "openai/gpt-4o-mini",
+    openrouter_metadata: dict | None = None,
+) -> bytes:
+    response = {
+        "model": model,
+        "choices": [{"message": {"content": text}}],
+        "usage": {"prompt_tokens": 100, "completion_tokens": 50},
+    }
+    if openrouter_metadata is not None:
+        response["openrouter_metadata"] = openrouter_metadata
+    return json.dumps(response).encode("utf-8")
 
 
 def _mock_empty_response() -> bytes:
@@ -106,7 +111,33 @@ class TestOpenRouterClientGenerate:
         assert result.token_usage == {"prompt_tokens": 100, "completion_tokens": 50}
 
     def test_returns_response_metadata(self) -> None:
-        with patch("urllib.request.urlopen", return_value=_mock_urlopen(_mock_response("ok"))):
+        routing_metadata = {
+            "requested": "openai/gpt-4o-mini",
+            "strategy": "direct",
+            "region": "WAW",
+            "summary": "available=2, selected=OpenAI",
+            "attempt": 1,
+            "is_byok": False,
+            "endpoints": {
+                "total": 3,
+                "available": [
+                    {
+                        "provider": "OpenAI",
+                        "model": "openai/gpt-4o-mini-2025-08-07",
+                        "selected": True,
+                    },
+                    {
+                        "provider": "Azure",
+                        "model": "openai/gpt-4o-mini-2025-08-07",
+                        "selected": False,
+                    },
+                ],
+            },
+        }
+        with patch(
+            "urllib.request.urlopen",
+            return_value=_mock_urlopen(_mock_response("ok", openrouter_metadata=routing_metadata)),
+        ):
             client = OpenRouterClient(api_key="test-key")
             result = client.generate(_make_request())
 
@@ -120,7 +151,17 @@ class TestOpenRouterClientGenerate:
             "response_error": None,
             "choice_error": None,
             "usage": {"prompt_tokens": 100, "completion_tokens": 50},
-            "openrouter_metadata": None,
+            "openrouter_metadata": {
+                "requested": "openai/gpt-4o-mini",
+                "strategy": "direct",
+                "region": "WAW",
+                "summary": "available=2, selected=OpenAI",
+                "attempt": 1,
+                "is_byok": False,
+                "selected_endpoints": [
+                    {"provider": "OpenAI", "model": "openai/gpt-4o-mini-2025-08-07"}
+                ],
+            },
         }
 
     def test_sends_bearer_token(self) -> None:
