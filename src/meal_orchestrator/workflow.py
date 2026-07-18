@@ -23,7 +23,12 @@ from meal_orchestrator.domain import (
     WorkflowResult,
     WorkflowStatus,
 )
-from meal_orchestrator.llm import EmptyLlmResponseError, LlmFailureDetails, OpenRouterClient
+from meal_orchestrator.llm import (
+    LlmFailureDetails,
+    OpenRouterClient,
+    OpenRouterHttpError,
+    OpenRouterResponseError,
+)
 from meal_orchestrator.prompt_builder import build_prompt_payload
 from meal_orchestrator.providers import (
     MenuUnavailableError,
@@ -363,9 +368,9 @@ def _ensure_complete_requested_menu(menu: CanonicalMenu, user: UserConfig) -> No
 
 
 def _llm_failure_details(exc: Exception) -> LlmFailureDetails | None:
-    if isinstance(exc, EmptyLlmResponseError):
+    if isinstance(exc, (OpenRouterHttpError, OpenRouterResponseError)):
         return exc.details
     last_exception = getattr(exc, "last_exception", None)
-    if isinstance(last_exception, EmptyLlmResponseError):
+    if isinstance(last_exception, (OpenRouterHttpError, OpenRouterResponseError)):
         return last_exception.details
     return None

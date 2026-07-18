@@ -17,6 +17,8 @@ def post_json(url: str, *, headers: dict[str, str], body: bytes, timeout_seconds
             return resp.read()
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
-        raise urllib.error.HTTPError(
+        error = urllib.error.HTTPError(
             exc.url, exc.code, f"{exc.reason} — {detail}", exc.headers, None
-        ) from exc
+        )
+        error.response_body = detail
+        raise error from exc

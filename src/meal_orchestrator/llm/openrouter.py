@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import urllib.error
 from dataclasses import dataclass
 from typing import Any
 
@@ -25,16 +26,37 @@ class LlmFailureDetails:
     reason: str
     attempt: int
     response: Any
+    http_status: int | None = None
 
     def to_metadata(self) -> dict[str, Any]:
-        return {"reason": self.reason, **_response_metadata(self.response, self.attempt)}
+        return {
+            "reason": self.reason,
+            "http_status": self.http_status,
+            **_response_metadata(self.response, self.attempt),
+        }
 
 
-class EmptyLlmResponseError(RuntimeError):
+class OpenRouterResponseError(RuntimeError):
+    """Raised when OpenRouter returns an unusable completion response."""
+
+    def __init__(self, details: LlmFailureDetails, *, retryable: bool) -> None:
+        super().__init__(_failure_message(details))
+        self.details = details
+        self.retryable = retryable
+
+
+class EmptyLlmResponseError(OpenRouterResponseError):
     """Raised when OpenRouter returns a completion without usable text."""
 
     def __init__(self, details: LlmFailureDetails) -> None:
-        super().__init__(_failure_message(details))
+        super().__init__(details, retryable=True)
+
+
+class OpenRouterHttpError(urllib.error.HTTPError):
+    """HTTP error carrying the parsed OpenRouter failure details."""
+
+    def __init__(self, error: urllib.error.HTTPError, details: LlmFailureDetails) -> None:
+        super().__init__(error.url, error.code, error.reason, error.headers, None)
         self.details = details
 
 
@@ -78,9 +100,12 @@ class OpenRouterClient:
         def _call() -> tuple[dict[str, Any], str]:
             nonlocal attempt
             attempt += 1
-            raw = post_json(
-                _API_URL, headers=headers, body=body, timeout_seconds=request.timeout_seconds
-            )
+            try:
+                raw = post_json(
+                    _API_URL, headers=headers, body=body, timeout_seconds=request.timeout_seconds
+                )
+            except urllib.error.HTTPError as exc:
+                raise _openrouter_http_error(exc, attempt) from exc
             response = json.loads(raw.decode("utf-8"))
             return response, _response_text(response, attempt)
 
@@ -90,7 +115,7 @@ class OpenRouterClient:
             base_delay_seconds=_BASE_DELAY,
             backoff_factor=_BACKOFF_FACTOR,
             retryable=lambda exc: is_transient_http_error(exc)
-            or isinstance(exc, EmptyLlmResponseError),
+            or (isinstance(exc, OpenRouterResponseError) and exc.retryable),
             operation_name=f"openrouter generate model={request.model}",
         )
 
@@ -119,12 +144,42 @@ def _response_text(response: Any, attempt: int) -> str:
         raise _empty_response_error("missing_message_content", attempt, response) from exc
     if not isinstance(text, str) or not text.strip():
         raise _empty_response_error("empty_message_content", attempt, response)
+    choice = _first_choice(response) if isinstance(response, dict) else {}
+    finish_reason = choice.get("finish_reason")
+    if finish_reason in {"content_filter", "error", "length"}:
+        raise OpenRouterResponseError(
+            LlmFailureDetails(
+                reason=f"finish_reason_{finish_reason}",
+                attempt=attempt,
+                response=response,
+            ),
+            retryable=finish_reason == "error",
+        )
     return text
 
 
 def _empty_response_error(reason: str, attempt: int, response: Any) -> EmptyLlmResponseError:
     return EmptyLlmResponseError(
         LlmFailureDetails(reason=reason, attempt=attempt, response=response)
+    )
+
+
+def _openrouter_http_error(
+    error: urllib.error.HTTPError, attempt: int
+) -> OpenRouterHttpError:
+    response_body = getattr(error, "response_body", "")
+    try:
+        response = json.loads(response_body)
+    except json.JSONDecodeError:
+        response = {"error": {"code": error.code, "message": response_body or error.reason}}
+    return OpenRouterHttpError(
+        error,
+        LlmFailureDetails(
+            reason="http_error",
+            attempt=attempt,
+            response=response,
+            http_status=error.code,
+        ),
     )
 
 

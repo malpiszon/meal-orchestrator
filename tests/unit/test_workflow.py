@@ -58,7 +58,11 @@ class FakeLlmClient:
 
     def generate(self, request):
         self.requests.append(request)
-        return LlmResult(text="Generated meal plan", model=request.model)
+        return LlmResult(
+            text="Generated meal plan",
+            model=request.model,
+            response_metadata={"generation_id": "gen-example"},
+        )
 
 
 class FailingLlmClient:
@@ -176,6 +180,7 @@ def test_artifacts_written_on_successful_run(tmp_path: Path) -> None:
     assert metadata["status"] == "completed"
     assert metadata["user_id"] == "alan"
     assert metadata["app_version"] == __version__
+    assert metadata["llm_response"] == {"generation_id": "gen-example"}
 
 
 def test_llm_artifacts_saved_on_dry_run(tmp_path: Path) -> None:
