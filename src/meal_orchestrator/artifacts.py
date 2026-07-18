@@ -64,6 +64,9 @@ class _FilesystemRunArtifacts(RunArtifacts):
         )
 
     def save_llm_response(self, result: LlmResult) -> None:
+        if not isinstance(result.text, str):
+            logger.warning("LLM response artifact skipped: response text is not a string")
+            return
         self._write_safe(
             "llm_response.txt",
             lambda: (self._run_dir / "llm_response.txt").write_text(result.text, encoding="utf-8"),

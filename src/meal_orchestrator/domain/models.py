@@ -157,3 +157,4 @@ class WorkflowResult:
     user_id: str
     status: WorkflowStatus
     detail: str | None = None
+    failed_step: str | None = None

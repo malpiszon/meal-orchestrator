@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from meal_orchestrator.domain import LlmRequest, PromptPayload
-from meal_orchestrator.llm.openrouter import OpenRouterClient
+from meal_orchestrator.llm.openrouter import EmptyLlmResponseError, OpenRouterClient
 from meal_orchestrator.retries import RetryError
 from tests.unit.helpers import canonical_menu
 
@@ -20,7 +20,7 @@ def _make_request(model: str = "openai/gpt-4o-mini") -> LlmRequest:
     )
 
 
-def _mock_response(text: str, model: str = "openai/gpt-4o-mini") -> bytes:
+def _mock_response(text: str | None, model: str = "openai/gpt-4o-mini") -> bytes:
     return json.dumps(
         {
             "model": model,
@@ -155,6 +155,33 @@ class TestOpenRouterClientGenerate:
                 client = OpenRouterClient(api_key="test-key", max_retries=3)
                 with pytest.raises(RetryError):
                     client.generate(_make_request())
+
+    def test_retries_when_response_has_no_text_and_eventually_succeeds(self) -> None:
+        call_count = 0
+
+        def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _mock_urlopen(_mock_response(None))
+            return _mock_urlopen(_mock_response("ok"))
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            with patch("time.sleep"):
+                client = OpenRouterClient(api_key="test-key", max_retries=3)
+                result = client.generate(_make_request())
+
+        assert call_count == 2
+        assert result.text == "ok"
+
+    def test_raises_retry_error_when_response_has_no_text_after_all_attempts(self) -> None:
+        with patch("urllib.request.urlopen", return_value=_mock_urlopen(_mock_response(None))):
+            with patch("time.sleep"):
+                client = OpenRouterClient(api_key="test-key", max_retries=3)
+                with pytest.raises(RetryError) as exc_info:
+                    client.generate(_make_request())
+
+        assert isinstance(exc_info.value.last_exception, EmptyLlmResponseError)
 
     def test_non_retryable_error_raised_immediately(self) -> None:
         http_401 = urllib.error.HTTPError(

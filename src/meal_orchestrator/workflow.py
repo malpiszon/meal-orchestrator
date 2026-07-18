@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from meal_orchestrator import __version__
-from meal_orchestrator.artifacts import ArtifactStore
+from meal_orchestrator.artifacts import ArtifactStore, RunArtifacts
 from meal_orchestrator.config import AppConfig, UserConfig
 from meal_orchestrator.delivery import DiscordClient, EmailClient
 from meal_orchestrator.delivery.discord import COLOR_SUCCESS, COLOR_WARNING
@@ -16,6 +17,7 @@ from meal_orchestrator.domain import (
     DiscordMessage,
     EmailMessage,
     LlmRequest,
+    LlmResult,
     ProviderMenuRequest,
     RunContext,
     WorkflowResult,
@@ -30,6 +32,16 @@ from meal_orchestrator.providers import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _WorkflowState:
+    started_at: datetime
+    status: WorkflowStatus = WorkflowStatus.FAILED
+    model: str | None = None
+    token_usage: dict | None = None
+    error: str | None = None
+    failed_step: str = "provider"
 
 
 class UserWorkflowExecutor:
@@ -60,205 +72,249 @@ class UserWorkflowExecutor:
             "week_start": run_context.week_start.isoformat(),
         }
         artifacts = self.artifact_store.for_run(run_context.run_id, user.id)
-        started_at = datetime.now(UTC)
-        final_status = WorkflowStatus.FAILED
-        final_model: str | None = None
-        final_token_usage: dict | None = None
-        final_error: str | None = None
+        state = _WorkflowState(started_at=datetime.now(UTC))
 
         logger.info("user workflow started", extra={**log_context, "step": "start"})
         try:
-            provider_result = self.provider.get_canonical_week_menu(
-                ProviderMenuRequest(
-                    week_start=run_context.week_start,
-                    week_end=run_context.week_end,
-                    provider_offering_id=user.provider_offering_id,
-                    user_id=user.id,
-                    purchased_meals=user.purchased_meals,
-                )
-            )
-            menu = provider_result.menu
-            if provider_result.raw_response is not None:
-                artifacts.save_provider_raw(provider_result.raw_response)
-            artifacts.save_canonical_menu(menu)
+            menu = self._fetch_menu(user, run_context, artifacts, log_context)
 
-            _ensure_complete_requested_menu(menu, user)
-            logger.info(
-                "provider menu normalized",
-                extra={
-                    **log_context,
-                    "step": "provider",
-                    "days": len(menu.days),
-                    "payload_bytes": _json_size(menu),
-                },
-            )
-
-            prompt_payload = build_prompt_payload(
-                prompt_file=self.project_root / user.prompt_file,
-                menu=menu,
-            )
-            logger.info("prompt payload built", extra={**log_context, "step": "prompt"})
-
-            if run_context.dry_run:
-                default_model = self.app_config.llm.dry_run_model or self.app_config.llm.model
-            else:
-                default_model = self.app_config.llm.model
-
-            llm_request = LlmRequest(
-                model=run_context.llm_model or default_model,
-                payload=prompt_payload,
-                timeout_seconds=self.app_config.llm.timeout_seconds,
-            )
-
+            state.failed_step = "prompt"
+            llm_request = self._build_llm_request(user, run_context, menu, log_context)
             artifacts.save_llm_request(llm_request)
 
-            llm_result = self.llm_client.generate(llm_request)
-            artifacts.save_llm_response(llm_result)
-            logger.info("llm result generated", extra={**log_context, "step": "llm"})
+            state.failed_step = "llm"
+            llm_result = self._generate_plan(llm_request, artifacts, log_context)
+            state.model = llm_result.model
+            state.token_usage = llm_result.token_usage
 
-            final_model = llm_result.model
-            final_token_usage = llm_result.token_usage
+            state.failed_step = "email"
+            self._deliver_email(user, run_context, llm_result, log_context)
 
-            if not run_context.dry_run and self.email_client is not None:
-                try:
-                    self.email_client.send(
-                        EmailMessage(
-                            to=user.email,
-                            from_address=self.app_config.delivery.email_from,
-                            subject=(
-                                f"Meal plan for {run_context.week_start.isoformat()}"
-                                f" – {run_context.week_end.isoformat()}"
-                            ),
-                            body=llm_result.text,
-                        ),
-                        idempotency_key=f"{run_context.run_id}:{user.id}:email",
-                    )
-                except Exception as exc:
-                    logger.error(
-                        "email delivery failed",
-                        exc_info=True,
-                        extra={**log_context, "step": "email", "error": str(exc)},
-                    )
-                    raise
-            else:
-                logger.info("email delivery skipped", extra={**log_context, "step": "email"})
-
-            if _discord_enabled(run_context, user):
-                try:
-                    self.discord_client.notify(
-                        DiscordMessage(
-                            webhook_env=user.discord_webhook_env,
-                            title="Meal plan ready",
-                            description=(
-                                f"Hey <@{user.discord_user_id}>, "
-                                f"your meal plan for "
-                                f"{run_context.week_start.isoformat()}–"
-                                f"{run_context.week_end.isoformat()} "
-                                "is ready."
-                            ),
-                            color=COLOR_SUCCESS,
-                        )
-                    )
-                    logger.info(
-                        "discord notification processed",
-                        extra={**log_context, "step": "discord"},
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "discord user notification failed (best effort)",
-                        exc_info=True,
-                        extra={**log_context, "step": "discord", "error": str(exc)},
-                    )
-            else:
-                logger.info(
-                    "discord notification skipped",
-                    extra={
-                        **log_context,
-                        "step": "discord",
-                        "reason": _discord_disabled_reason(run_context, user),
-                    },
-                )
+            state.failed_step = "discord"
+            self._notify_plan_ready(user, run_context, log_context)
 
             logger.info("user workflow completed", extra={**log_context, "step": "complete"})
-            final_status = WorkflowStatus.COMPLETED
+            state.status = WorkflowStatus.COMPLETED
             return WorkflowResult(user_id=user.id, status=WorkflowStatus.COMPLETED)
         except ProviderNormalizationError as exc:
             if exc.raw_response is not None:
                 artifacts.save_provider_raw(exc.raw_response)
-            final_error = str(exc)
-            final_status = WorkflowStatus.FAILED
+            state.error = str(exc)
             logger.error(
                 "provider normalization failed",
                 exc_info=True,
-                extra={**log_context, "step": "provider", "error": final_error},
+                extra={**log_context, "step": "provider", "error": state.error},
             )
             return WorkflowResult(
                 user_id=user.id,
                 status=WorkflowStatus.FAILED,
-                detail=final_error,
+                detail=state.error,
+                failed_step=state.failed_step,
             )
         except MenuUnavailableError as exc:
             if exc.raw_response is not None:
                 artifacts.save_provider_raw(exc.raw_response)
-            final_error = str(exc)
+            state.error = str(exc)
             logger.info("menu unavailable", extra={**log_context, "step": "provider"})
-            final_status = WorkflowStatus.MENU_UNAVAILABLE
-            if _discord_enabled(run_context, user):
-                try:
-                    self.discord_client.notify(
-                        DiscordMessage(
-                            webhook_env=user.discord_webhook_env,
-                            title="Menu not available yet",
-                            description=(
-                                f"Hey <@{user.discord_user_id}>, "
-                                f"the menu for "
-                                f"{run_context.week_start.isoformat()}–"
-                                f"{run_context.week_end.isoformat()} "
-                                "is not available yet."
-                            ),
-                            color=COLOR_WARNING,
-                        )
-                    )
-                except Exception as exc_discord:
-                    logger.warning(
-                        "discord user notification failed for menu unavailable (best effort)",
-                        exc_info=True,
-                        extra={**log_context, "step": "discord", "error": str(exc_discord)},
-                    )
+            state.status = WorkflowStatus.MENU_UNAVAILABLE
+            self._notify_menu_unavailable(user, run_context, log_context)
             return WorkflowResult(
                 user_id=user.id,
                 status=WorkflowStatus.MENU_UNAVAILABLE,
-                detail=final_error,
+                detail=state.error,
             )
         except Exception as exc:
-            final_error = str(exc)
+            state.error = str(exc)
             logger.error(
                 "user workflow failed",
                 exc_info=True,
-                extra={**log_context, "step": "failed", "error": final_error},
+                extra={**log_context, "step": "failed", "error": state.error},
             )
             return WorkflowResult(
                 user_id=user.id,
                 status=WorkflowStatus.FAILED,
-                detail=final_error,
+                detail=state.error,
+                failed_step=state.failed_step,
             )
         finally:
-            metadata: dict = {
-                "app_version": __version__,
-                "run_id": run_context.run_id,
-                "user_id": user.id,
-                "provider": run_context.provider_id,
-                "week_start": run_context.week_start.isoformat(),
-                "week_end": run_context.week_end.isoformat(),
-                "model": final_model,
-                "token_usage": final_token_usage,
-                "started_at": started_at.isoformat(),
-                "ended_at": datetime.now(UTC).isoformat(),
-                "status": str(final_status),
-            }
-            if final_error is not None:
-                metadata["error"] = final_error
-            artifacts.save_metadata(metadata)
+            self._save_metadata(artifacts, user, run_context, state)
+
+    def _fetch_menu(
+        self,
+        user: UserConfig,
+        run_context: RunContext,
+        artifacts: RunArtifacts,
+        log_context: dict,
+    ) -> CanonicalMenu:
+        provider_result = self.provider.get_canonical_week_menu(
+            ProviderMenuRequest(
+                week_start=run_context.week_start,
+                week_end=run_context.week_end,
+                provider_offering_id=user.provider_offering_id,
+                user_id=user.id,
+                purchased_meals=user.purchased_meals,
+            )
+        )
+        menu = provider_result.menu
+        if provider_result.raw_response is not None:
+            artifacts.save_provider_raw(provider_result.raw_response)
+        artifacts.save_canonical_menu(menu)
+        _ensure_complete_requested_menu(menu, user)
+        logger.info(
+            "provider menu normalized",
+            extra={
+                **log_context,
+                "step": "provider",
+                "days": len(menu.days),
+                "payload_bytes": _json_size(menu),
+            },
+        )
+        return menu
+
+    def _build_llm_request(
+        self,
+        user: UserConfig,
+        run_context: RunContext,
+        menu: CanonicalMenu,
+        log_context: dict,
+    ) -> LlmRequest:
+        prompt_payload = build_prompt_payload(
+            prompt_file=self.project_root / user.prompt_file,
+            menu=menu,
+        )
+        logger.info("prompt payload built", extra={**log_context, "step": "prompt"})
+        default_model = self.app_config.llm.model
+        if run_context.dry_run:
+            default_model = self.app_config.llm.dry_run_model or default_model
+        return LlmRequest(
+            model=run_context.llm_model or default_model,
+            payload=prompt_payload,
+            timeout_seconds=self.app_config.llm.timeout_seconds,
+        )
+
+    def _generate_plan(
+        self, request: LlmRequest, artifacts: RunArtifacts, log_context: dict
+    ) -> LlmResult:
+        result = self.llm_client.generate(request)
+        artifacts.save_llm_response(result)
+        logger.info("llm result generated", extra={**log_context, "step": "llm"})
+        return result
+
+    def _deliver_email(
+        self,
+        user: UserConfig,
+        run_context: RunContext,
+        llm_result: LlmResult,
+        log_context: dict,
+    ) -> None:
+        if run_context.dry_run or self.email_client is None:
+            logger.info("email delivery skipped", extra={**log_context, "step": "email"})
+            return
+        try:
+            self.email_client.send(
+                EmailMessage(
+                    to=user.email,
+                    from_address=self.app_config.delivery.email_from,
+                    subject=(
+                        f"Meal plan for {run_context.week_start.isoformat()}"
+                        f" – {run_context.week_end.isoformat()}"
+                    ),
+                    body=llm_result.text,
+                ),
+                idempotency_key=f"{run_context.run_id}:{user.id}:email",
+            )
+        except Exception as exc:
+            logger.error(
+                "email delivery failed",
+                exc_info=True,
+                extra={**log_context, "step": "email", "error": str(exc)},
+            )
+            raise
+
+    def _notify_plan_ready(
+        self, user: UserConfig, run_context: RunContext, log_context: dict
+    ) -> None:
+        if not _discord_enabled(run_context, user):
+            logger.info(
+                "discord notification skipped",
+                extra={
+                    **log_context,
+                    "step": "discord",
+                    "reason": _discord_disabled_reason(run_context, user),
+                },
+            )
+            return
+        try:
+            self.discord_client.notify(
+                DiscordMessage(
+                    webhook_env=user.discord_webhook_env,
+                    title="Meal plan ready",
+                    description=(
+                        f"Hey <@{user.discord_user_id}>, your meal plan for "
+                        f"{run_context.week_start.isoformat()}–{run_context.week_end.isoformat()} "
+                        "is ready."
+                    ),
+                    color=COLOR_SUCCESS,
+                )
+            )
+            logger.info("discord notification processed", extra={**log_context, "step": "discord"})
+        except Exception as exc:
+            logger.warning(
+                "discord user notification failed (best effort)",
+                exc_info=True,
+                extra={**log_context, "step": "discord", "error": str(exc)},
+            )
+
+    def _notify_menu_unavailable(
+        self, user: UserConfig, run_context: RunContext, log_context: dict
+    ) -> None:
+        if not _discord_enabled(run_context, user):
+            return
+        try:
+            self.discord_client.notify(
+                DiscordMessage(
+                    webhook_env=user.discord_webhook_env,
+                    title="Menu not available yet",
+                    description=(
+                        f"Hey <@{user.discord_user_id}>, the menu for "
+                        f"{run_context.week_start.isoformat()}–{run_context.week_end.isoformat()} "
+                        "is not available yet."
+                    ),
+                    color=COLOR_WARNING,
+                )
+            )
+        except Exception as exc:
+            logger.warning(
+                "discord user notification failed for menu unavailable (best effort)",
+                exc_info=True,
+                extra={**log_context, "step": "discord", "error": str(exc)},
+            )
+
+    def _save_metadata(
+        self,
+        artifacts: RunArtifacts,
+        user: UserConfig,
+        run_context: RunContext,
+        state: _WorkflowState,
+    ) -> None:
+        metadata: dict = {
+            "app_version": __version__,
+            "run_id": run_context.run_id,
+            "user_id": user.id,
+            "provider": run_context.provider_id,
+            "week_start": run_context.week_start.isoformat(),
+            "week_end": run_context.week_end.isoformat(),
+            "model": state.model,
+            "token_usage": state.token_usage,
+            "started_at": state.started_at.isoformat(),
+            "ended_at": datetime.now(UTC).isoformat(),
+            "status": str(state.status),
+        }
+        if state.error is not None:
+            metadata["error"] = state.error
+        if state.status == WorkflowStatus.FAILED:
+            metadata["failed_step"] = state.failed_step
+        artifacts.save_metadata(metadata)
 
 
 def _discord_enabled(run_context: RunContext, user: UserConfig) -> bool:

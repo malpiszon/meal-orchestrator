@@ -110,6 +110,7 @@ def test_orchestrator_sends_operational_notification_on_failure(tmp_path, monkey
 
     assert result[0].status == WorkflowStatus.FAILED
     assert discord.messages[0].webhook_env == "DISCORD_OPS_WEBHOOK_URL"
+    assert "step provider" in discord.messages[0].description
     assert "provider exploded" in discord.messages[0].description
 
 

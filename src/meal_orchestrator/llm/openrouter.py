@@ -17,6 +17,10 @@ _BASE_DELAY = 1.0
 _BACKOFF_FACTOR = 2.0
 
 
+class EmptyLlmResponseError(RuntimeError):
+    """Raised when OpenRouter returns a completion without usable text."""
+
+
 def _build_message_content(payload: PromptPayload) -> list[dict[str, str]]:
     # Separate blocks keep instructions and data structurally distinct for large JSON payloads.
     menu_json = json.dumps(
@@ -52,22 +56,23 @@ class OpenRouterClient:
             "X-OpenRouter-Title": APP_NAME,
         }
 
-        def _call() -> dict[str, Any]:
+        def _call() -> tuple[dict[str, Any], str]:
             raw = post_json(
                 _API_URL, headers=headers, body=body, timeout_seconds=request.timeout_seconds
             )
-            return json.loads(raw.decode("utf-8"))
+            response = json.loads(raw.decode("utf-8"))
+            return response, _response_text(response)
 
-        response = with_retries(
+        response, text = with_retries(
             _call,
             max_attempts=self._max_retries,
             base_delay_seconds=_BASE_DELAY,
             backoff_factor=_BACKOFF_FACTOR,
-            retryable=is_transient_http_error,
+            retryable=lambda exc: is_transient_http_error(exc)
+            or isinstance(exc, EmptyLlmResponseError),
             operation_name=f"openrouter generate model={request.model}",
         )
 
-        text = response["choices"][0]["message"]["content"]
         usage = response.get("usage")
         token_usage = None
         if usage:
@@ -79,3 +84,13 @@ class OpenRouterClient:
 
         logger.info("openrouter: model=%s tokens=%s", model, token_usage)
         return LlmResult(text=text, model=model, token_usage=token_usage)
+
+
+def _response_text(response: dict[str, Any]) -> str:
+    try:
+        text = response["choices"][0]["message"]["content"]
+    except (IndexError, KeyError, TypeError) as exc:
+        raise EmptyLlmResponseError("OpenRouter response has no message content") from exc
+    if not isinstance(text, str) or not text.strip():
+        raise EmptyLlmResponseError("OpenRouter response has empty message content")
+    return text
