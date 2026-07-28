@@ -97,3 +97,74 @@ def test_retryable_predicate_called_with_exception() -> None:
         with_retries(fn, max_attempts=2, base_delay_seconds=0, retryable=retryable)
 
     assert seen == [exc, exc]
+
+
+def test_on_retry_called_once_before_each_retry_with_the_exception() -> None:
+    seen: list[Exception] = []
+    attempts = []
+
+    def fn():
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise OSError(f"transient {len(attempts)}")
+        return "ok"
+
+    result = with_retries(
+        fn,
+        max_attempts=3,
+        base_delay_seconds=0,
+        retryable=_always_retryable,
+        on_retry=seen.append,
+    )
+
+    assert result == "ok"
+    assert [str(exc) for exc in seen] == ["transient 1", "transient 2"]
+
+
+def test_on_retry_not_called_on_first_attempt_success() -> None:
+    calls = []
+
+    def fn():
+        return "ok"
+
+    with_retries(fn, retryable=_always_retryable, on_retry=calls.append)
+
+    assert calls == []
+
+
+def test_on_retry_not_called_on_final_exhausted_attempt() -> None:
+    calls = []
+
+    def fn():
+        raise OSError("always fails")
+
+    with pytest.raises(RetryError):
+        with_retries(
+            fn,
+            max_attempts=2,
+            base_delay_seconds=0,
+            retryable=_always_retryable,
+            on_retry=calls.append,
+        )
+
+    # Two attempts total, but only one retry happens (before attempt 2) — the
+    # final failing attempt exhausts retries and must not invoke on_retry.
+    assert len(calls) == 1
+
+
+def test_on_retry_not_called_for_non_retryable_exception() -> None:
+    calls = []
+
+    def fn():
+        raise ValueError("not retryable")
+
+    with pytest.raises(ValueError):
+        with_retries(
+            fn,
+            max_attempts=3,
+            base_delay_seconds=0,
+            retryable=_never_retryable,
+            on_retry=calls.append,
+        )
+
+    assert calls == []

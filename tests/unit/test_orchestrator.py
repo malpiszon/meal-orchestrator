@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 
 from meal_orchestrator.domain import LlmResult, ProviderMenuRequest, ProviderResult, WorkflowStatus
@@ -10,6 +11,7 @@ from tests.unit.helpers import (
     app_config,
     canonical_menu,
     user_config,
+    week_assessment,
 )
 
 
@@ -33,7 +35,11 @@ class FailingProvider:
 
 class FakeLlmClient:
     def generate(self, request):
-        return LlmResult(text="Generated", model=request.model)
+        return LlmResult(structured=week_assessment(request.payload.menu), model=request.model)
+
+
+def _no_capability_check(model: str) -> None:
+    pass
 
 
 def test_orchestrator_uses_provider_override(tmp_path) -> None:
@@ -50,6 +56,7 @@ def test_orchestrator_uses_provider_override(tmp_path) -> None:
         llm_client=FakeLlmClient(),
         email_client=FakeEmailClient(),
         discord_client=discord,
+        capability_check=_no_capability_check,
     )
 
     result = orchestrator.run(
@@ -79,6 +86,7 @@ def test_orchestrator_sends_operational_notification_on_completed(tmp_path, monk
         llm_client=FakeLlmClient(),
         email_client=FakeEmailClient(),
         discord_client=discord,
+        capability_check=_no_capability_check,
     )
 
     result = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
@@ -104,6 +112,7 @@ def test_orchestrator_sends_operational_notification_on_failure(tmp_path, monkey
         llm_client=FakeLlmClient(),
         email_client=FakeEmailClient(),
         discord_client=discord,
+        capability_check=_no_capability_check,
     )
 
     result = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
@@ -131,6 +140,7 @@ def test_orchestrator_skips_operational_notification_when_env_var_not_set(
         llm_client=FakeLlmClient(),
         email_client=FakeEmailClient(),
         discord_client=discord,
+        capability_check=_no_capability_check,
     )
 
     result = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
@@ -154,7 +164,7 @@ def test_orchestrator_wires_configured_max_retries_into_llm_client(monkeypatch, 
             captured_kwargs.update(kwargs)
 
         def generate(self, request):
-            return LlmResult(text="Generated", model=request.model)
+            return LlmResult(structured=week_assessment(request.payload.menu), model=request.model)
 
     monkeypatch.setattr("meal_orchestrator.orchestrator.OpenRouterClient", SpyOpenRouterClient)
 
@@ -165,6 +175,7 @@ def test_orchestrator_wires_configured_max_retries_into_llm_client(monkeypatch, 
         provider_factory=lambda provider_id: RecordingProvider(),
         email_client=FakeEmailClient(),
         discord_client=FakeDiscordClient(),
+        capability_check=_no_capability_check,
     )
 
     orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=True))
@@ -185,9 +196,132 @@ def test_orchestrator_dry_run_suppresses_ops_notification(tmp_path) -> None:
         llm_client=FakeLlmClient(),
         email_client=FakeEmailClient(),
         discord_client=discord,
+        capability_check=_no_capability_check,
     )
 
     result = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=True))
 
     assert result[0].status == WorkflowStatus.FAILED
+    assert discord.messages == []
+
+
+def test_orchestrator_runs_capability_check_with_resolved_model(tmp_path) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    captured_models: list[str] = []
+
+    orchestrator = RunOrchestrator(
+        app_config=app_config(),
+        users=[user_config(prompt_file.relative_to(tmp_path))],
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=FakeLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=FakeDiscordClient(),
+        capability_check=captured_models.append,
+    )
+
+    orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+    orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=True))
+    orchestrator.run(
+        RunOptions(week_start=date(2026, 6, 1), dry_run=False, llm_model="override-model")
+    )
+
+    assert captured_models == ["test-model", "test-dry-run-model", "override-model"]
+
+
+def test_orchestrator_fails_all_users_gracefully_when_capability_check_fails(tmp_path) -> None:
+    """A capability-check failure must degrade like every other failure mode.
+
+    Not propagate as a raw uncaught exception that crashes the whole process
+    with no per-user WorkflowResult and no ops notification.
+    """
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+
+    def _failing_capability_check(model: str) -> None:
+        raise RuntimeError("model does not support structured outputs")
+
+    other_user_prompt = tmp_path / "other_prompt.md"
+    other_user_prompt.write_text("Choose meals.", encoding="utf-8")
+    users = [
+        user_config(prompt_file.relative_to(tmp_path)),
+        replace(
+            user_config(other_user_prompt.relative_to(tmp_path)),
+            id="other",
+            email="other@example.com",
+        ),
+    ]
+
+    orchestrator = RunOrchestrator(
+        app_config=app_config(),
+        users=users,
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=FakeLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=FakeDiscordClient(),
+        capability_check=_failing_capability_check,
+    )
+
+    results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert len(results) == 2
+    for result in results:
+        assert result.status == WorkflowStatus.FAILED
+        assert result.failed_step == "capability_check"
+        assert "does not support structured outputs" in result.detail
+
+
+def test_capability_check_failure_sends_ops_notification(tmp_path, monkeypatch) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    monkeypatch.setenv("DISCORD_OPS_WEBHOOK_URL", "https://example.com/ops")
+    discord = FakeDiscordClient()
+
+    def _failing_capability_check(model: str) -> None:
+        raise RuntimeError("model does not support structured outputs")
+
+    orchestrator = RunOrchestrator(
+        app_config=app_config(),
+        users=[user_config(prompt_file.relative_to(tmp_path))],
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=FakeLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=discord,
+        capability_check=_failing_capability_check,
+    )
+
+    orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert len(discord.messages) == 1
+    assert discord.messages[0].webhook_env == "DISCORD_OPS_WEBHOOK_URL"
+    assert "Capability check failed" in discord.messages[0].description
+
+
+def test_capability_check_failure_suppresses_ops_notification_on_dry_run(
+    tmp_path, monkeypatch
+) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    monkeypatch.setenv("DISCORD_OPS_WEBHOOK_URL", "https://example.com/ops")
+    discord = FakeDiscordClient()
+
+    def _failing_capability_check(model: str) -> None:
+        raise RuntimeError("model does not support structured outputs")
+
+    orchestrator = RunOrchestrator(
+        app_config=app_config(),
+        users=[user_config(prompt_file.relative_to(tmp_path))],
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=FakeLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=discord,
+        capability_check=_failing_capability_check,
+    )
+
+    orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=True))
+
     assert discord.messages == []

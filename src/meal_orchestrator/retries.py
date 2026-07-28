@@ -33,6 +33,7 @@ def with_retries[T](
     backoff_factor: float = 2.0,
     retryable: Callable[[Exception], bool],
     operation_name: str = "operation",
+    on_retry: Callable[[Exception], None] | None = None,
 ) -> T:  # noqa: UP047 — `from __future__ import annotations` prevents PEP 695 syntax
     """Execute fn with exponential backoff retries.
 
@@ -43,6 +44,10 @@ def with_retries[T](
         backoff_factor: Multiplier applied to delay on each subsequent attempt.
         retryable: Predicate that returns True for exceptions that should be retried.
         operation_name: Used in log messages.
+        on_retry: Optional callback invoked with the caught exception right before
+            each retry (not on the final, non-retried attempt). Lets a caller adapt
+            its next attempt (e.g. add corrective context to a request) without
+            reimplementing the retry loop itself.
 
     Returns:
         The return value of fn on success.
@@ -63,6 +68,8 @@ def with_retries[T](
             if not retryable(exc):
                 raise
             if attempt < max_attempts:
+                if on_retry is not None:
+                    on_retry(exc)
                 logger.warning(
                     "%s failed (attempt %d/%d): %s — retrying in %.1fs",
                     operation_name,

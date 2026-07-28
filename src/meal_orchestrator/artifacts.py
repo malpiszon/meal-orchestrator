@@ -64,12 +64,11 @@ class _FilesystemRunArtifacts(RunArtifacts):
         )
 
     def save_llm_response(self, result: LlmResult) -> None:
-        if not isinstance(result.text, str):
-            logger.warning("LLM response artifact skipped: response text is not a string")
-            return
         self._write_safe(
-            "llm_response.txt",
-            lambda: (self._run_dir / "llm_response.txt").write_text(result.text, encoding="utf-8"),
+            "llm_response.json",
+            lambda: _write_json(
+                self._run_dir / "llm_response.json", result.structured.model_dump(mode="json")
+            ),
         )
 
     def save_metadata(self, metadata: dict[str, Any]) -> None:

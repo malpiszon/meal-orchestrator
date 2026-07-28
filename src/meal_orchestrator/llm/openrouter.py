@@ -7,8 +7,15 @@ import urllib.error
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import ValidationError
+
 from meal_orchestrator import APP_NAME
-from meal_orchestrator.domain import LlmRequest, LlmResult, PromptPayload
+from meal_orchestrator.domain import CanonicalMenu, LlmRequest, LlmResult, PromptPayload
+from meal_orchestrator.domain.llm_output import (
+    WeekAssessment,
+    validate_completeness,
+    week_assessment_json_schema,
+)
 from meal_orchestrator.http import post_json
 from meal_orchestrator.retries import is_transient_http_error, with_retries
 
@@ -17,6 +24,12 @@ logger = logging.getLogger(__name__)
 _API_URL = "https://openrouter.ai/api/v1/chat/completions"
 _BASE_DELAY = 1.0
 _BACKOFF_FACTOR = 2.0
+
+_SCAFFOLDING_INSTRUCTION = (
+    "Assess every meal variant present in the menu JSON below: give each one a score "
+    "and up to two short justification points. Do not select a single winner and skip "
+    "the rest — every variant of every meal of every day must be assessed."
+)
 
 
 @dataclass(frozen=True)
@@ -52,6 +65,22 @@ class EmptyLlmResponseError(OpenRouterResponseError):
         super().__init__(details, retryable=True)
 
 
+class StructuredOutputError(OpenRouterResponseError):
+    """Raised when the completion's content isn't valid JSON matching WeekAssessment."""
+
+    def __init__(self, details: LlmFailureDetails, *, parse_error: str) -> None:
+        super().__init__(details, retryable=True)
+        self.parse_error = parse_error
+
+
+class IncompleteAssessmentError(OpenRouterResponseError):
+    """Raised when a schema-valid assessment is missing meals/variants from the menu."""
+
+    def __init__(self, details: LlmFailureDetails, *, problems: list[str]) -> None:
+        super().__init__(details, retryable=True)
+        self.problems = problems
+
+
 class OpenRouterHttpError(urllib.error.HTTPError):
     """HTTP error carrying the parsed OpenRouter failure details."""
 
@@ -60,18 +89,35 @@ class OpenRouterHttpError(urllib.error.HTTPError):
         self.details = details
 
 
-def _build_message_content(payload: PromptPayload) -> list[dict[str, str]]:
+def _build_message_content(
+    payload: PromptPayload, feedback: str | None
+) -> list[dict[str, str]]:
     # Separate blocks keep instructions and data structurally distinct for large JSON payloads.
     menu_json = json.dumps(
         payload.menu.to_compact_dict(),
         ensure_ascii=False,
         separators=(",", ":"),
     )
-    return [
+    blocks = [
         {"type": "text", "text": f"User instructions:\n{payload.user_prompt}"},
         {"type": "text", "text": f"Canonical menu JSON:\n{menu_json}"},
-        {"type": "text", "text": "Return plain text only."},
+        {"type": "text", "text": _SCAFFOLDING_INSTRUCTION},
     ]
+    if feedback:
+        blocks.append({"type": "text", "text": feedback})
+    return blocks
+
+
+# The schema shape is static for the process lifetime, so it's built once here
+# rather than on every request/retry attempt.
+_RESPONSE_FORMAT: dict[str, Any] = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "week_assessment",
+        "strict": True,
+        "schema": week_assessment_json_schema(),
+    },
+}
 
 
 class OpenRouterClient:
@@ -80,14 +126,6 @@ class OpenRouterClient:
         self._max_retries = max_retries
 
     def generate(self, request: LlmRequest) -> LlmResult:
-        body = json.dumps(
-            {
-                "model": request.model,
-                "messages": [
-                    {"role": "user", "content": _build_message_content(request.payload)}
-                ],
-            }
-        ).encode("utf-8")
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
@@ -96,10 +134,23 @@ class OpenRouterClient:
             "X-OpenRouter-Experimental-Metadata": "enabled",
         }
         attempt = 0
+        feedback: str | None = None
 
-        def _call() -> tuple[dict[str, Any], str]:
+        def _call() -> tuple[dict[str, Any], WeekAssessment]:
             nonlocal attempt
             attempt += 1
+            body = json.dumps(
+                {
+                    "model": request.model,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": _build_message_content(request.payload, feedback),
+                        }
+                    ],
+                    "response_format": _RESPONSE_FORMAT,
+                }
+            ).encode("utf-8")
             try:
                 raw = post_json(
                     _API_URL, headers=headers, body=body, timeout_seconds=request.timeout_seconds
@@ -107,9 +158,16 @@ class OpenRouterClient:
             except urllib.error.HTTPError as exc:
                 raise _openrouter_http_error(exc, attempt) from exc
             response = json.loads(raw.decode("utf-8"))
-            return response, _response_text(response, attempt)
+            return response, _response_structured(response, request.payload.menu, attempt)
 
-        response, text = with_retries(
+        def _on_retry(exc: Exception) -> None:
+            nonlocal feedback
+            if isinstance(exc, OpenRouterResponseError):
+                new_feedback = _feedback_for(exc)
+                if new_feedback is not None:
+                    feedback = new_feedback
+
+        response, assessment = with_retries(
             _call,
             max_attempts=self._max_retries,
             base_delay_seconds=_BASE_DELAY,
@@ -117,24 +175,60 @@ class OpenRouterClient:
             retryable=lambda exc: is_transient_http_error(exc)
             or (isinstance(exc, OpenRouterResponseError) and exc.retryable),
             operation_name=f"openrouter generate model={request.model}",
+            on_retry=_on_retry,
         )
+        return _build_result(response, assessment, attempt, request.model)
 
-        usage = response.get("usage")
-        token_usage = None
-        if usage:
-            token_usage = {
-                "prompt_tokens": usage.get("prompt_tokens"),
-                "completion_tokens": usage.get("completion_tokens"),
-            }
-        model = response.get("model", request.model)
 
-        logger.info("openrouter: model=%s tokens=%s", model, token_usage)
-        return LlmResult(
-            text=text,
-            model=model,
-            token_usage=token_usage,
-            response_metadata=_response_metadata(response, attempt, compact_routing_metadata=True),
+def _build_result(
+    response: dict[str, Any], assessment: WeekAssessment, attempt: int, requested_model: str
+) -> LlmResult:
+    usage = response.get("usage")
+    token_usage = None
+    if usage:
+        token_usage = {
+            "prompt_tokens": usage.get("prompt_tokens"),
+            "completion_tokens": usage.get("completion_tokens"),
+        }
+    model = response.get("model", requested_model)
+    logger.info("openrouter: model=%s tokens=%s", model, token_usage)
+    return LlmResult(
+        structured=assessment,
+        model=model,
+        token_usage=token_usage,
+        response_metadata=_response_metadata(response, attempt, compact_routing_metadata=True),
+    )
+
+
+def _feedback_for(exc: OpenRouterResponseError) -> str | None:
+    if isinstance(exc, StructuredOutputError):
+        return (
+            "Your previous response did not match the required JSON schema "
+            f"({exc.parse_error}). Return a response that strictly matches the schema."
         )
+    if isinstance(exc, IncompleteAssessmentError):
+        joined = "; ".join(exc.problems)
+        return (
+            f"Your previous response was incomplete: {joined}. Assess every meal and "
+            "every variant listed in the menu JSON — do not skip any of them."
+        )
+    return None
+
+
+def _response_structured(response: Any, menu: CanonicalMenu, attempt: int) -> WeekAssessment:
+    text = _response_text(response, attempt)
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise _structured_output_error(f"invalid JSON: {exc}", attempt, response) from exc
+    try:
+        assessment = WeekAssessment.model_validate(parsed)
+    except ValidationError as exc:
+        raise _structured_output_error(str(exc), attempt, response) from exc
+    problems = validate_completeness(assessment, menu)
+    if problems:
+        raise _incomplete_assessment_error(problems, attempt, response)
+    return assessment
 
 
 def _response_text(response: Any, attempt: int) -> str:
@@ -161,6 +255,24 @@ def _response_text(response: Any, attempt: int) -> str:
 def _empty_response_error(reason: str, attempt: int, response: Any) -> EmptyLlmResponseError:
     return EmptyLlmResponseError(
         LlmFailureDetails(reason=reason, attempt=attempt, response=response)
+    )
+
+
+def _structured_output_error(
+    parse_error: str, attempt: int, response: Any
+) -> StructuredOutputError:
+    return StructuredOutputError(
+        LlmFailureDetails(reason="invalid_structured_output", attempt=attempt, response=response),
+        parse_error=parse_error,
+    )
+
+
+def _incomplete_assessment_error(
+    problems: list[str], attempt: int, response: Any
+) -> IncompleteAssessmentError:
+    return IncompleteAssessmentError(
+        LlmFailureDetails(reason="incomplete_assessment", attempt=attempt, response=response),
+        problems=problems,
     )
 
 

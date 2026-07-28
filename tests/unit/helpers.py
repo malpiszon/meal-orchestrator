@@ -9,10 +9,15 @@ from meal_orchestrator.domain import (
     CanonicalDay,
     CanonicalMeal,
     CanonicalMenu,
+    DayAssessment,
     DiscordMessage,
     EmailMessage,
+    Justification,
+    MealAssessment,
     MealVariant,
     PurchasedMeal,
+    VariantAssessment,
+    WeekAssessment,
 )
 
 
@@ -68,6 +73,29 @@ def canonical_menu(*, complete: bool = True) -> CanonicalMenu:
         user_id="alan",
         days=days,
     )
+
+
+def week_assessment(menu: CanonicalMenu, *, score: int = 8) -> WeekAssessment:
+    """Build a WeekAssessment that fully covers `menu` — one variant per meal by default."""
+    days = []
+    for day in menu.days:
+        meals = [
+            MealAssessment(
+                meal_type=meal.type,
+                variants=[
+                    VariantAssessment(
+                        variant_index=index,
+                        name=variant.name,
+                        score=score,
+                        justifications=[Justification(icon="💪", text="Good choice.")],
+                    )
+                    for index, variant in enumerate(meal.variants)
+                ],
+            )
+            for meal in day.meals
+        ]
+        days.append(DayAssessment(date=day.date, meals=meals))
+    return WeekAssessment(days=days)
 
 
 class FakeEmailClient:

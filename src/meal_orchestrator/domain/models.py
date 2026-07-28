@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from meal_orchestrator.domain.llm_output import WeekAssessment
 
 
 @dataclass(frozen=True)
@@ -125,7 +128,7 @@ class LlmRequest:
 
 @dataclass(frozen=True)
 class LlmResult:
-    text: str
+    structured: WeekAssessment
     model: str
     token_usage: dict[str, int] | None = None
     response_metadata: dict[str, Any] | None = None
