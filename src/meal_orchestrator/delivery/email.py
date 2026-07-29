@@ -30,14 +30,15 @@ class ResendEmailClient:
 
     def send(self, message: EmailMessage, idempotency_key: str) -> None:
         api_key = self._api_key if self._api_key is not None else os.environ["RESEND_API_KEY"]
-        body = json.dumps(
-            {
-                "from": message.from_address,
-                "to": [message.to],
-                "subject": message.subject,
-                "text": message.body,
-            }
-        ).encode("utf-8")
+        payload: dict[str, object] = {
+            "from": message.from_address,
+            "to": [message.to],
+            "subject": message.subject,
+            "text": message.body,
+        }
+        if message.html_body is not None:
+            payload["html"] = message.html_body
+        body = json.dumps(payload).encode("utf-8")
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
