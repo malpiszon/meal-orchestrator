@@ -1,4 +1,14 @@
 from meal_orchestrator.domain.dates import nearest_upcoming_monday, week_end_for
+from meal_orchestrator.domain.llm_output import (
+    DayAssessment,
+    Justification,
+    MealAssessment,
+    VariantAssessment,
+    WeekAssessment,
+    validate_completeness,
+    week_assessment_json_schema,
+)
+from meal_orchestrator.domain.meal_types import CANONICAL_MEAL_TYPES
 from meal_orchestrator.domain.models import (
     CanonicalDay,
     CanonicalMeal,
@@ -19,13 +29,17 @@ from meal_orchestrator.domain.models import (
 )
 
 __all__ = [
+    "CANONICAL_MEAL_TYPES",
     "CanonicalDay",
     "CanonicalMeal",
     "CanonicalMenu",
+    "DayAssessment",
     "DiscordMessage",
     "EmailMessage",
+    "Justification",
     "LlmRequest",
     "LlmResult",
+    "MealAssessment",
     "MealVariant",
     "Nutrition",
     "ProviderMenuRequest",
@@ -33,8 +47,12 @@ __all__ = [
     "PromptPayload",
     "PurchasedMeal",
     "RunContext",
+    "VariantAssessment",
+    "WeekAssessment",
     "WorkflowResult",
     "WorkflowStatus",
     "nearest_upcoming_monday",
     "week_end_for",
+    "validate_completeness",
+    "week_assessment_json_schema",
 ]

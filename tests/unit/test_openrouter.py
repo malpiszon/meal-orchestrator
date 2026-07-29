@@ -9,12 +9,14 @@ import pytest
 from meal_orchestrator.domain import LlmRequest, PromptPayload
 from meal_orchestrator.llm.openrouter import (
     EmptyLlmResponseError,
+    IncompleteAssessmentError,
     OpenRouterClient,
     OpenRouterHttpError,
     OpenRouterResponseError,
+    StructuredOutputError,
 )
 from meal_orchestrator.retries import RetryError
-from tests.unit.helpers import canonical_menu
+from tests.unit.helpers import canonical_menu, week_assessment
 
 
 def _make_request(model: str = "openai/gpt-4o-mini") -> LlmRequest:
@@ -25,14 +27,18 @@ def _make_request(model: str = "openai/gpt-4o-mini") -> LlmRequest:
     )
 
 
+def _assessment_json(**kwargs) -> str:
+    return week_assessment(canonical_menu(), **kwargs).model_dump_json()
+
+
 def _mock_response(
-    text: str | None,
+    content: str | None,
     model: str = "openai/gpt-4o-mini",
     openrouter_metadata: dict | None = None,
 ) -> bytes:
     response = {
         "model": model,
-        "choices": [{"message": {"content": text}}],
+        "choices": [{"message": {"content": content}}],
         "usage": {"prompt_tokens": 100, "completion_tokens": 50},
     }
     if openrouter_metadata is not None:
@@ -84,19 +90,22 @@ def _mock_urlopen(response_body: bytes):
 
 
 class TestOpenRouterClientGenerate:
-    def test_returns_llm_result_with_text(self) -> None:
+    def test_returns_llm_result_with_structured_assessment(self) -> None:
         with patch(
-            "urllib.request.urlopen", return_value=_mock_urlopen(_mock_response("Eat salad."))
+            "urllib.request.urlopen",
+            return_value=_mock_urlopen(_mock_response(_assessment_json())),
         ):
             client = OpenRouterClient(api_key="test-key")
             result = client.generate(_make_request())
 
-        assert result.text == "Eat salad."
+        assert result.structured == week_assessment(canonical_menu())
 
     def test_returns_model_from_response(self) -> None:
         with patch(
             "urllib.request.urlopen",
-            return_value=_mock_urlopen(_mock_response("ok", model="openai/gpt-4o-mini")),
+            return_value=_mock_urlopen(
+                _mock_response(_assessment_json(), model="openai/gpt-4o-mini")
+            ),
         ):
             client = OpenRouterClient(api_key="test-key")
             result = client.generate(_make_request())
@@ -104,7 +113,10 @@ class TestOpenRouterClientGenerate:
         assert result.model == "openai/gpt-4o-mini"
 
     def test_returns_token_usage(self) -> None:
-        with patch("urllib.request.urlopen", return_value=_mock_urlopen(_mock_response("ok"))):
+        with patch(
+            "urllib.request.urlopen",
+            return_value=_mock_urlopen(_mock_response(_assessment_json())),
+        ):
             client = OpenRouterClient(api_key="test-key")
             result = client.generate(_make_request())
 
@@ -136,7 +148,9 @@ class TestOpenRouterClientGenerate:
         }
         with patch(
             "urllib.request.urlopen",
-            return_value=_mock_urlopen(_mock_response("ok", openrouter_metadata=routing_metadata)),
+            return_value=_mock_urlopen(
+                _mock_response(_assessment_json(), openrouter_metadata=routing_metadata)
+            ),
         ):
             client = OpenRouterClient(api_key="test-key")
             result = client.generate(_make_request())
@@ -169,7 +183,7 @@ class TestOpenRouterClientGenerate:
 
         def side_effect(req, timeout=None):
             captured["auth"] = req.get_header("Authorization")
-            return _mock_urlopen(_mock_response("ok"))
+            return _mock_urlopen(_mock_response(_assessment_json()))
 
         with patch("urllib.request.urlopen", side_effect=side_effect):
             client = OpenRouterClient(api_key="secret-key")
@@ -182,7 +196,7 @@ class TestOpenRouterClientGenerate:
 
         def side_effect(req, timeout=None):
             captured["metadata"] = req.get_header("X-openrouter-experimental-metadata")
-            return _mock_urlopen(_mock_response("ok"))
+            return _mock_urlopen(_mock_response(_assessment_json()))
 
         with patch("urllib.request.urlopen", side_effect=side_effect):
             client = OpenRouterClient(api_key="test-key")
@@ -195,7 +209,7 @@ class TestOpenRouterClientGenerate:
 
         def side_effect(req, timeout=None):
             captured["body"] = json.loads(req.data.decode("utf-8"))
-            return _mock_urlopen(_mock_response("ok"))
+            return _mock_urlopen(_mock_response(_assessment_json()))
 
         with patch("urllib.request.urlopen", side_effect=side_effect):
             client = OpenRouterClient(api_key="test-key")
@@ -203,12 +217,28 @@ class TestOpenRouterClientGenerate:
 
         assert captured["body"]["model"] == "anthropic/claude-haiku-4-5"
 
+    def test_sends_strict_json_schema_response_format(self) -> None:
+        captured = {}
+
+        def side_effect(req, timeout=None):
+            captured["body"] = json.loads(req.data.decode("utf-8"))
+            return _mock_urlopen(_mock_response(_assessment_json()))
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            client = OpenRouterClient(api_key="test-key")
+            client.generate(_make_request())
+
+        response_format = captured["body"]["response_format"]
+        assert response_format["type"] == "json_schema"
+        assert response_format["json_schema"]["strict"] is True
+        assert response_format["json_schema"]["schema"]["properties"]["days"]
+
     def test_message_content_is_array_with_separate_json_block(self) -> None:
         captured = {}
 
         def side_effect(req, timeout=None):
             captured["body"] = json.loads(req.data.decode("utf-8"))
-            return _mock_urlopen(_mock_response("ok"))
+            return _mock_urlopen(_mock_response(_assessment_json()))
 
         with patch("urllib.request.urlopen", side_effect=side_effect):
             client = OpenRouterClient(api_key="test-key")
@@ -219,14 +249,14 @@ class TestOpenRouterClientGenerate:
         texts = [block["text"] for block in content]
         assert any("Choose the best meals." in t for t in texts)
         assert any("Canonical menu JSON:" in t for t in texts)
-        assert any("Return plain text only." in t for t in texts)
+        assert any("Assess every meal variant" in t for t in texts)
 
     def test_json_block_is_separate_from_instructions(self) -> None:
         captured = {}
 
         def side_effect(req, timeout=None):
             captured["body"] = json.loads(req.data.decode("utf-8"))
-            return _mock_urlopen(_mock_response("ok"))
+            return _mock_urlopen(_mock_response(_assessment_json()))
 
         with patch("urllib.request.urlopen", side_effect=side_effect):
             client = OpenRouterClient(api_key="test-key")
@@ -248,7 +278,7 @@ class TestOpenRouterClientGenerate:
             call_count += 1
             if call_count < 3:
                 raise http_500
-            return _mock_urlopen(_mock_response("ok"))
+            return _mock_urlopen(_mock_response(_assessment_json()))
 
         with patch("urllib.request.urlopen", side_effect=side_effect):
             with patch("time.sleep"):
@@ -256,7 +286,7 @@ class TestOpenRouterClientGenerate:
                 result = client.generate(_make_request())
 
         assert call_count == 3
-        assert result.text == "ok"
+        assert result.structured == week_assessment(canonical_menu())
 
     def test_raises_retry_error_after_exhausted_retries(self) -> None:
         http_500 = urllib.error.HTTPError(
@@ -276,7 +306,7 @@ class TestOpenRouterClientGenerate:
             call_count += 1
             if call_count == 1:
                 return _mock_urlopen(_mock_response(None))
-            return _mock_urlopen(_mock_response("ok"))
+            return _mock_urlopen(_mock_response(_assessment_json()))
 
         with patch("urllib.request.urlopen", side_effect=side_effect):
             with patch("time.sleep"):
@@ -284,7 +314,7 @@ class TestOpenRouterClientGenerate:
                 result = client.generate(_make_request())
 
         assert call_count == 2
-        assert result.text == "ok"
+        assert result.structured == week_assessment(canonical_menu())
 
     def test_raises_retry_error_when_response_has_no_text_after_all_attempts(self) -> None:
         with patch("urllib.request.urlopen", return_value=_mock_urlopen(_mock_empty_response())):
@@ -376,3 +406,150 @@ class TestOpenRouterClientGenerate:
 
         assert exc_info.value.code == 401
         assert call_count == 1
+
+    def test_retries_on_invalid_json_content_and_eventually_succeeds(self) -> None:
+        call_count = 0
+
+        def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _mock_urlopen(_mock_response("not json"))
+            return _mock_urlopen(_mock_response(_assessment_json()))
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            with patch("time.sleep"):
+                client = OpenRouterClient(api_key="test-key", max_retries=3)
+                result = client.generate(_make_request())
+
+        assert call_count == 2
+        assert result.structured == week_assessment(canonical_menu())
+
+    def test_raises_retry_error_when_content_never_matches_schema(self) -> None:
+        with patch(
+            "urllib.request.urlopen",
+            return_value=_mock_urlopen(_mock_response(json.dumps({"days": "not-a-list"}))),
+        ):
+            with patch("time.sleep"):
+                client = OpenRouterClient(api_key="test-key", max_retries=2)
+                with pytest.raises(RetryError) as exc_info:
+                    client.generate(_make_request())
+
+        assert isinstance(exc_info.value.last_exception, StructuredOutputError)
+        assert exc_info.value.last_exception.details.reason == "invalid_structured_output"
+
+    def test_feeds_back_schema_error_into_next_attempt(self) -> None:
+        bodies = []
+
+        def side_effect(req, timeout=None):
+            bodies.append(json.loads(req.data.decode("utf-8")))
+            if len(bodies) == 1:
+                return _mock_urlopen(_mock_response("not json"))
+            return _mock_urlopen(_mock_response(_assessment_json()))
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            with patch("time.sleep"):
+                client = OpenRouterClient(api_key="test-key", max_retries=3)
+                client.generate(_make_request())
+
+        second_attempt_texts = [block["text"] for block in bodies[1]["messages"][0]["content"]]
+        assert any("did not match the required JSON schema" in t for t in second_attempt_texts)
+
+    def test_raises_retry_error_when_assessment_is_incomplete(self) -> None:
+        incomplete_menu = canonical_menu()
+        incomplete_assessment = week_assessment(incomplete_menu)
+        # Drop the only day, leaving no meals assessed at all.
+        incomplete_assessment = incomplete_assessment.model_copy(update={"days": []})
+
+        with patch(
+            "urllib.request.urlopen",
+            return_value=_mock_urlopen(
+                _mock_response(incomplete_assessment.model_dump_json())
+            ),
+        ):
+            with patch("time.sleep"):
+                client = OpenRouterClient(api_key="test-key", max_retries=2)
+                with pytest.raises(RetryError) as exc_info:
+                    client.generate(_make_request())
+
+        assert isinstance(exc_info.value.last_exception, IncompleteAssessmentError)
+        assert exc_info.value.last_exception.details.reason == "incomplete_assessment"
+        assert exc_info.value.last_exception.problems
+
+    def test_retries_on_url_error_and_eventually_succeeds(self) -> None:
+        """Plain network errors (not HTTPError) must still be retried.
+
+        A prior hand-rolled retry loop only caught urllib.error.HTTPError around
+        the request, silently dropping retry coverage for connection-level
+        failures — regression-test that URLError goes through the same
+        transient-retry path as a 5xx.
+        """
+        call_count = 0
+
+        def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise urllib.error.URLError("connection reset")
+            return _mock_urlopen(_mock_response(_assessment_json()))
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            with patch("time.sleep"):
+                client = OpenRouterClient(api_key="test-key", max_retries=3)
+                result = client.generate(_make_request())
+
+        assert call_count == 2
+        assert result.structured == week_assessment(canonical_menu())
+
+    def test_retries_on_timeout_error_and_eventually_succeeds(self) -> None:
+        call_count = 0
+
+        def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise TimeoutError("timed out")
+            return _mock_urlopen(_mock_response(_assessment_json()))
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            with patch("time.sleep"):
+                client = OpenRouterClient(api_key="test-key", max_retries=3)
+                result = client.generate(_make_request())
+
+        assert call_count == 2
+        assert result.structured == week_assessment(canonical_menu())
+
+    def test_raises_value_error_for_non_positive_max_retries(self) -> None:
+        client = OpenRouterClient(api_key="test-key", max_retries=0)
+
+        with pytest.raises(ValueError, match="max_attempts must be >= 1"):
+            client.generate(_make_request())
+
+    def test_preserves_earlier_feedback_when_a_later_error_has_no_specific_feedback(
+        self,
+    ) -> None:
+        """Corrective feedback from an earlier attempt must not be discarded.
+
+        Attempt 1 fails with a schema error (which has specific feedback text).
+        Attempt 2 fails with an empty response (which _feedback_for doesn't
+        recognize, so it returns None) — that must not erase attempt 1's
+        feedback before attempt 3 is sent.
+        """
+        bodies = []
+
+        def side_effect(req, timeout=None):
+            bodies.append(json.loads(req.data.decode("utf-8")))
+            if len(bodies) == 1:
+                return _mock_urlopen(_mock_response("not json"))
+            if len(bodies) == 2:
+                return _mock_urlopen(_mock_response(None))
+            return _mock_urlopen(_mock_response(_assessment_json()))
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            with patch("time.sleep"):
+                client = OpenRouterClient(api_key="test-key", max_retries=3)
+                client.generate(_make_request())
+
+        assert len(bodies) == 3
+        third_attempt_texts = [block["text"] for block in bodies[2]["messages"][0]["content"]]
+        assert any("did not match the required JSON schema" in t for t in third_attempt_texts)

@@ -9,7 +9,7 @@ from pathlib import Path
 from meal_orchestrator.artifacts import ArtifactStore
 from meal_orchestrator.config.models import ArtifactConfig
 from meal_orchestrator.domain import LlmRequest, LlmResult, PromptPayload
-from tests.unit.helpers import canonical_menu
+from tests.unit.helpers import canonical_menu, week_assessment
 
 
 def _config(
@@ -30,6 +30,10 @@ def _llm_request() -> LlmRequest:
     )
 
 
+def _llm_result() -> LlmResult:
+    return LlmResult(structured=week_assessment(canonical_menu()), model="test-model")
+
+
 def test_saves_all_artifacts(tmp_path: Path) -> None:
     store = ArtifactStore(_config(tmp_path))
     run = store.for_run("run-1", "alan")
@@ -37,14 +41,14 @@ def test_saves_all_artifacts(tmp_path: Path) -> None:
     run.save_provider_raw({"raw": "data"})
     run.save_canonical_menu(canonical_menu())
     run.save_llm_request(_llm_request())
-    run.save_llm_response(LlmResult(text="response text", model="test-model"))
+    run.save_llm_response(_llm_result())
     run.save_metadata({"run_id": "run-1", "status": "completed"})
 
     run_dir = tmp_path / "artifacts" / "alan" / "run-1"
     assert (run_dir / "provider_raw.json").exists()
     assert (run_dir / "canonical_menu.json").exists()
     assert (run_dir / "llm_request.json").exists()
-    assert (run_dir / "llm_response.txt").exists()
+    assert (run_dir / "llm_response.json").exists()
     assert (run_dir / "metadata.json").exists()
 
 
@@ -56,9 +60,11 @@ def test_artifacts_content(tmp_path: Path) -> None:
     raw = json.loads((tmp_path / "artifacts" / "alan" / "run-1" / "provider_raw.json").read_text())
     assert raw == {"key": "value"}
 
-    run.save_llm_response(LlmResult(text="meal suggestion", model="test-model"))
-    text = (tmp_path / "artifacts" / "alan" / "run-1" / "llm_response.txt").read_text()
-    assert text == "meal suggestion"
+    run.save_llm_response(_llm_result())
+    response = json.loads(
+        (tmp_path / "artifacts" / "alan" / "run-1" / "llm_response.json").read_text()
+    )
+    assert response == week_assessment(canonical_menu()).model_dump(mode="json")
 
     run.save_llm_request(_llm_request())
     req = json.loads((tmp_path / "artifacts" / "alan" / "run-1" / "llm_request.json").read_text())
@@ -67,13 +73,13 @@ def test_artifacts_content(tmp_path: Path) -> None:
     assert "days" in req["menu"]
 
 
-def test_skips_llm_response_artifact_when_text_is_not_a_string(tmp_path: Path) -> None:
+def test_skips_llm_response_artifact_when_structured_is_invalid(tmp_path: Path) -> None:
     store = ArtifactStore(_config(tmp_path))
     run = store.for_run("run-1", "example")
 
-    run.save_llm_response(LlmResult(text=None, model="test-model"))  # type: ignore[arg-type]
+    run.save_llm_response(LlmResult(structured=None, model="test-model"))  # type: ignore[arg-type]
 
-    assert not (tmp_path / "artifacts" / "example" / "run-1" / "llm_response.txt").exists()
+    assert not (tmp_path / "artifacts" / "example" / "run-1" / "llm_response.json").exists()
 
 
 def test_noop_when_no_config(tmp_path: Path) -> None:

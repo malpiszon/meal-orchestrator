@@ -9,6 +9,7 @@ from meal_orchestrator import __version__
 from meal_orchestrator.artifacts import ArtifactStore
 from meal_orchestrator.config.models import ArtifactConfig
 from meal_orchestrator.domain import (
+    CanonicalMeal,
     LlmResult,
     ProviderMenuRequest,
     ProviderResult,
@@ -17,6 +18,7 @@ from meal_orchestrator.domain import (
 )
 from meal_orchestrator.llm import EmptyLlmResponseError, LlmFailureDetails
 from meal_orchestrator.providers import ProviderNormalizationError
+from meal_orchestrator.rendering.plain_text import render_plain_text
 from meal_orchestrator.retries import RetryError
 from meal_orchestrator.workflow import UserWorkflowExecutor
 from tests.unit.helpers import (
@@ -25,6 +27,7 @@ from tests.unit.helpers import (
     app_config,
     canonical_menu,
     user_config,
+    week_assessment,
 )
 
 
@@ -59,7 +62,7 @@ class FakeLlmClient:
     def generate(self, request):
         self.requests.append(request)
         return LlmResult(
-            text="Generated meal plan",
+            structured=week_assessment(request.payload.menu),
             model=request.model,
             response_metadata={"generation_id": "gen-example"},
         )
@@ -118,7 +121,9 @@ def test_non_dry_run_calls_llm_and_email(tmp_path) -> None:
 
     assert result.status == WorkflowStatus.COMPLETED
     assert len(llm.requests) == 1
-    assert email.messages[0].body == "Generated meal plan"
+    assert email.messages[0].body == render_plain_text(
+        week_assessment(canonical_menu()), canonical_menu()
+    )
     assert email.idempotency_keys == ["run-1:alan:email"]
 
 
@@ -158,6 +163,49 @@ def test_incomplete_menu_skips_llm_and_email(tmp_path, monkeypatch) -> None:
     assert len(discord.messages) == 1
 
 
+def test_purchased_meal_with_no_variants_is_treated_as_menu_unavailable(
+    tmp_path, monkeypatch
+) -> None:
+    """A meal type present but with zero variants must fail fast here.
+
+    Otherwise it reaches the LLM and, if the model echoes back zero variants
+    for it too (which passes completeness validation, since there's nothing to
+    require), the renderer crashes with IndexError deep in email delivery.
+    """
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    monkeypatch.setenv("DISCORD_USER_WEBHOOK_URL", "https://example.com/user")
+    menu = canonical_menu()
+    empty_day = menu.days[0]
+    menu = replace(
+        menu,
+        days=[
+            replace(empty_day, meals=[CanonicalMeal(type="breakfast", variants=[])]),
+            *menu.days[1:],
+        ],
+    )
+
+    class EmptyVariantsProvider:
+        provider_id = "example_provider"
+
+        def get_canonical_week_menu(self, request: ProviderMenuRequest):
+            return ProviderResult(menu=menu)
+
+    llm = FakeLlmClient()
+    email = FakeEmailClient()
+    discord = FakeDiscordClient()
+
+    result = _executor(tmp_path, EmptyVariantsProvider(), llm, email, discord).execute(
+        user_config(PathLikePrompt(prompt_file, tmp_path)),
+        _context(dry_run=False),
+    )
+
+    assert result.status == WorkflowStatus.MENU_UNAVAILABLE
+    assert "no variants" in result.detail
+    assert llm.requests == []
+    assert email.messages == []
+
+
 def test_artifacts_written_on_successful_run(tmp_path: Path) -> None:
     prompt_file = tmp_path / "prompt.md"
     prompt_file.write_text("Choose meals.", encoding="utf-8")
@@ -175,7 +223,7 @@ def test_artifacts_written_on_successful_run(tmp_path: Path) -> None:
     assert (run_dir / "provider_raw.json").exists()
     assert (run_dir / "canonical_menu.json").exists()
     assert (run_dir / "llm_request.json").exists()
-    assert (run_dir / "llm_response.txt").exists()
+    assert (run_dir / "llm_response.json").exists()
     metadata = json.loads((run_dir / "metadata.json").read_text())
     assert metadata["status"] == "completed"
     assert metadata["user_id"] == "alan"
@@ -198,7 +246,7 @@ def test_llm_artifacts_saved_on_dry_run(tmp_path: Path) -> None:
 
     run_dir = artifacts_dir / "alan" / "run-1"
     assert (run_dir / "llm_request.json").exists()
-    assert (run_dir / "llm_response.txt").exists()
+    assert (run_dir / "llm_response.json").exists()
     metadata = json.loads((run_dir / "metadata.json").read_text())
     assert metadata["status"] == "completed"
 

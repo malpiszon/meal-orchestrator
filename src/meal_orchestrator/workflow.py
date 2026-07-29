@@ -35,6 +35,7 @@ from meal_orchestrator.providers import (
     ProviderAdapter,
     ProviderNormalizationError,
 )
+from meal_orchestrator.rendering.plain_text import render_plain_text
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +97,7 @@ class UserWorkflowExecutor:
             state.llm_response = llm_result.response_metadata
 
             state.failed_step = "email"
-            self._deliver_email(user, run_context, llm_result, log_context)
+            self._deliver_email(user, run_context, menu, llm_result, log_context)
 
             state.failed_step = "discord"
             self._notify_plan_ready(user, run_context, log_context)
@@ -213,6 +214,7 @@ class UserWorkflowExecutor:
         self,
         user: UserConfig,
         run_context: RunContext,
+        menu: CanonicalMenu,
         llm_result: LlmResult,
         log_context: dict,
     ) -> None:
@@ -228,7 +230,7 @@ class UserWorkflowExecutor:
                         f"Meal plan for {run_context.week_start.isoformat()}"
                         f" – {run_context.week_end.isoformat()}"
                     ),
-                    body=llm_result.text,
+                    body=render_plain_text(llm_result.structured, menu),
                 ),
                 idempotency_key=f"{run_context.run_id}:{user.id}:email",
             )
@@ -357,12 +359,18 @@ def _ensure_complete_requested_menu(menu: CanonicalMenu, user: UserConfig) -> No
             raise MenuUnavailableError(
                 f"missing purchased meals for requested date: {current.isoformat()}"
             )
-        meal_types = {meal.type for meal in day.meals}
+        meals_by_type = {meal.type: meal for meal in day.meals}
         for purchased_meal in user.purchased_meals:
-            if purchased_meal.type not in meal_types:
+            meal = meals_by_type.get(purchased_meal.type)
+            if meal is None:
                 raise MenuUnavailableError(
                     "missing purchased meal "
                     f"{purchased_meal.type} for requested date: {current.isoformat()}"
+                )
+            if not meal.variants:
+                raise MenuUnavailableError(
+                    f"purchased meal {purchased_meal.type} for requested date "
+                    f"{current.isoformat()} has no variants"
                 )
         current += timedelta(days=1)
 

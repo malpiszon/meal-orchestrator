@@ -12,6 +12,16 @@ def post_json(url: str, *, headers: dict[str, str], body: bytes, timeout_seconds
     of an API error (e.g. validation details).
     """
     req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    return _urlopen(req, timeout_seconds)
+
+
+def get_json(url: str, *, headers: dict[str, str], timeout_seconds: int) -> bytes:
+    """GET url and return the raw response bytes, with the same HTTPError handling as post_json."""
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    return _urlopen(req, timeout_seconds)
+
+
+def _urlopen(req: urllib.request.Request, timeout_seconds: int) -> bytes:
     try:
         with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
             return resp.read()
