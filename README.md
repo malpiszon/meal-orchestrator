@@ -2,10 +2,14 @@
 
 A scheduled automation service that fetches a diet catering provider's weekly
 menu, filters it down to what a user actually purchased, asks an LLM (via
-OpenRouter) to pick the best option per day, and delivers the result by email
-and Discord.
+OpenRouter) to score and justify every meal variant, and delivers the result
+by email and Discord.
 
 ## Workflow
+
+Before processing any user, the run verifies the configured LLM model
+supports structured JSON outputs on OpenRouter, failing the whole run early
+if it doesn't.
 
 For each configured user, per run:
 
@@ -13,9 +17,11 @@ For each configured user, per run:
 2. Normalize the raw provider response into a compact canonical menu
    (purchased meal types and sizes only).
 3. Build a prompt from the user's own instructions plus the canonical menu.
-4. Send the prompt to an LLM through OpenRouter and get a plain-text
-   recommendation.
-5. Email the recommendation and post a Discord notification.
+4. Send the prompt to an LLM through OpenRouter, requesting a structured
+   assessment (score + justifications for every meal variant), retrying with
+   feedback if the response is malformed or incomplete.
+5. Render the assessment as plain text and email it, and post a Discord
+   notification.
 
 A run processes users sequentially and also sends an operational Discord
 notification summarizing success/failure. If a user's menu isn't published
@@ -27,11 +33,14 @@ a status notification is sent instead of treating it as an error.
 - Multi-user configuration, run all users or a single one (`--user`).
 - Pluggable provider adapters; `ntfy` is the working integration, plus a
   minimal `example_provider` used for tests and as a template.
-- OpenRouter LLM client with configurable model, timeout, and retries;
-  empty or provider-error completions retry, while filtered or truncated
-  completions stop the user's workflow without delivery. An optional
-  `llm.dry_run_model` is used instead of `llm.model` during `--dry-run` runs,
-  so validation runs can use a cheaper model.
+- OpenRouter LLM client requesting structured JSON output (per-variant score
+  and justifications), with configurable model, timeout, and retries; empty,
+  provider-error, malformed, or incomplete completions retry (with feedback
+  telling the model what to fix), while filtered or truncated completions
+  stop the user's workflow without delivery. A capability check rejects
+  models without structured-output support before any user is processed. An
+  optional `llm.dry_run_model` is used instead of `llm.model` during
+  `--dry-run` runs, so validation runs can use a cheaper model.
 - Email delivery via Resend, Discord notifications via webhooks (per-user and
   operational), both optional and independently configurable.
 - `--dry-run` mode that runs the full pipeline (including the LLM call)
@@ -51,7 +60,8 @@ src/meal_orchestrator/
   config/              YAML loading and config dataclasses
   domain/              shared dataclasses (canonical menu, requests/results, workflow status)
   providers/           provider adapters, one package per provider
-  llm/                 OpenRouter client
+  llm/                 OpenRouter client, model capability check
+  rendering/           renders a structured LLM assessment to plain text
   delivery/            Resend email client, Discord webhook client
   observability/       structured logging setup
   artifacts.py         per-run debug artifact persistence
