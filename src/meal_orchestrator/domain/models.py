@@ -140,6 +140,7 @@ class EmailMessage:
     from_address: str
     subject: str
     body: str
+    html_body: str | None = None
 
 
 @dataclass(frozen=True)

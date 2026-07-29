@@ -11,12 +11,13 @@ from meal_orchestrator.domain import EmailMessage
 from meal_orchestrator.retries import RetryError
 
 
-def _make_message() -> EmailMessage:
+def _make_message(*, html_body: str | None = None) -> EmailMessage:
     return EmailMessage(
         to="user@example.com",
         from_address="Meal Orchestrator <meals@example.com>",
         subject="Meal plan for 2026-06-02",
         body="Eat well this week.",
+        html_body=html_body,
     )
 
 
@@ -78,6 +79,32 @@ class TestResendEmailClientSend:
         assert body["to"] == [msg.to]
         assert body["subject"] == msg.subject
         assert body["text"] == msg.body
+
+    def test_includes_html_field_when_html_body_set(self) -> None:
+        captured = {}
+
+        def side_effect(req, timeout=None):
+            captured["body"] = json.loads(req.data.decode("utf-8"))
+            return _mock_urlopen()
+
+        msg = _make_message(html_body="<html><body>Eat well.</body></html>")
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            ResendEmailClient(api_key="test-key").send(msg, idempotency_key="key1")
+
+        assert captured["body"]["html"] == msg.html_body
+
+    def test_omits_html_field_when_html_body_absent(self) -> None:
+        captured = {}
+
+        def side_effect(req, timeout=None):
+            captured["body"] = json.loads(req.data.decode("utf-8"))
+            return _mock_urlopen()
+
+        msg = _make_message()
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            ResendEmailClient(api_key="test-key").send(msg, idempotency_key="key1")
+
+        assert "html" not in captured["body"]
 
     def test_retries_on_429_and_succeeds(self) -> None:
         http_429 = urllib.error.HTTPError(
