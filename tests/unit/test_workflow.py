@@ -58,20 +58,23 @@ class FakeProviderWithNormalizationError:
 
 
 class FakeLlmClient:
-    def __init__(self) -> None:
+    def __init__(self, *, attempt: int = 1) -> None:
         self.requests = []
+        self.attempt = attempt
 
-    def generate(self, request):
+    def generate(self, request, *, on_attempt=None):
         self.requests.append(request)
+        if on_attempt is not None:
+            on_attempt(self.attempt, None, {"id": "gen-example"}, {"accepted": True})
         return LlmResult(
             structured=week_assessment(request.payload.menu),
             model=request.model,
-            response_metadata={"generation_id": "gen-example"},
+            response_metadata={"generation_id": "gen-example", "attempt": self.attempt},
         )
 
 
 class FailingLlmClient:
-    def generate(self, request):
+    def generate(self, request, **_kwargs):
         raise RetryError(
             "openrouter failed after 3 attempt(s)",
             EmptyLlmResponseError(
@@ -147,6 +150,54 @@ def test_no_email_client_skips_email(tmp_path, monkeypatch) -> None:
 
     assert len(llm.requests) == 1
     assert len(discord.messages) == 1
+
+
+def test_user_discord_notification_never_mentions_retries(tmp_path, monkeypatch) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    monkeypatch.setenv("DISCORD_USER_WEBHOOK_URL", "https://example.com/user")
+    llm = FakeLlmClient(attempt=3)
+    discord = FakeDiscordClient()
+
+    _executor(tmp_path, FakeProvider(), llm, FakeEmailClient(), discord).execute(
+        user_config(PathLikePrompt(prompt_file, tmp_path)),
+        _context(dry_run=False),
+    )
+
+    assert len(discord.messages) == 1
+    assert "retr" not in discord.messages[0].description
+
+
+def test_workflow_result_reports_retry_count_on_success(tmp_path) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    llm = FakeLlmClient(attempt=3)
+
+    result = _executor(
+        tmp_path, FakeProvider(), llm, FakeEmailClient(), FakeDiscordClient()
+    ).execute(
+        user_config(PathLikePrompt(prompt_file, tmp_path)),
+        _context(dry_run=False),
+    )
+
+    assert result.status == WorkflowStatus.COMPLETED
+    assert result.retry_count == 2
+
+
+def test_workflow_result_reports_zero_retries_when_first_attempt_succeeds(tmp_path) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    llm = FakeLlmClient(attempt=1)
+
+    result = _executor(
+        tmp_path, FakeProvider(), llm, FakeEmailClient(), FakeDiscordClient()
+    ).execute(
+        user_config(PathLikePrompt(prompt_file, tmp_path)),
+        _context(dry_run=False),
+    )
+
+    assert result.status == WorkflowStatus.COMPLETED
+    assert result.retry_count == 0
 
 
 def test_incomplete_menu_skips_llm_and_email(tmp_path, monkeypatch) -> None:
@@ -230,11 +281,13 @@ def test_artifacts_written_on_successful_run(tmp_path: Path) -> None:
     assert (run_dir / "canonical_menu.json").exists()
     assert (run_dir / "llm_request.json").exists()
     assert (run_dir / "llm_response.json").exists()
+    attempt = json.loads((run_dir / "llm_attempts" / "attempt_01.json").read_text())
+    assert attempt["accepted"] is True
     metadata = json.loads((run_dir / "metadata.json").read_text())
     assert metadata["status"] == "completed"
     assert metadata["user_id"] == "alan"
     assert metadata["app_version"] == __version__
-    assert metadata["llm_response"] == {"generation_id": "gen-example"}
+    assert metadata["llm_response"] == {"generation_id": "gen-example", "attempt": 1}
 
 
 def test_llm_artifacts_saved_on_dry_run(tmp_path: Path) -> None:
@@ -297,6 +350,7 @@ def test_llm_failure_skips_delivery_and_records_failed_step(tmp_path: Path) -> N
 
     assert result.status == WorkflowStatus.FAILED
     assert result.failed_step == "llm"
+    assert result.retry_count == 2
     assert email.messages == []
     metadata = json.loads((artifacts_dir / "example" / "run-1" / "metadata.json").read_text())
     assert metadata["failed_step"] == "llm"

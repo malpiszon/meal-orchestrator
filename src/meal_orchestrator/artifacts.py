@@ -28,6 +28,9 @@ class RunArtifacts:
     def save_llm_response(self, result: LlmResult) -> None:
         pass
 
+    def save_llm_attempt(self, attempt: int, data: dict[str, Any]) -> None:
+        pass
+
     def save_metadata(self, metadata: dict[str, Any]) -> None:
         pass
 
@@ -69,6 +72,13 @@ class _FilesystemRunArtifacts(RunArtifacts):
             lambda: _write_json(
                 self._run_dir / "llm_response.json", result.structured.model_dump(mode="json")
             ),
+        )
+
+    def save_llm_attempt(self, attempt: int, data: dict[str, Any]) -> None:
+        name = f"llm_attempts/attempt_{attempt:02d}.json"
+        self._write_safe(
+            name,
+            lambda: _write_json(self._run_dir / name, data),
         )
 
     def save_metadata(self, metadata: dict[str, Any]) -> None:
@@ -136,4 +146,5 @@ def _cleanup_user_dir(user_dir: Path, cutoff: datetime, max_runs: int) -> None:
 
 
 def _write_json(path: Path, data: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")

@@ -213,11 +213,12 @@ class RunOrchestrator:
 def _build_ops_message(
     webhook_env: str, user_id: str, run_id: str, result: WorkflowResult
 ) -> DiscordMessage:
+    retry_note = _retry_note(result.retry_count)
     if result.status == WorkflowStatus.COMPLETED:
         return DiscordMessage(
             webhook_env=webhook_env,
             title="Workflow completed",
-            description=f"Workflow completed for user {user_id} (run {run_id}).",
+            description=f"Workflow completed for user {user_id} (run {run_id}).{retry_note}",
             color=COLOR_SUCCESS,
         )
     if result.status == WorkflowStatus.MENU_UNAVAILABLE:
@@ -234,10 +235,16 @@ def _build_ops_message(
         title="Workflow failed",
         description=(
             f"Workflow failed for user {user_id} (run {run_id}) at step {failed_step}: "
-            f"{result.detail or 'unknown error'}"
+            f"{result.detail or 'unknown error'}{retry_note}"
         ),
         color=COLOR_ERROR,
     )
+
+
+def _retry_note(retry_count: int | None) -> str:
+    if not retry_count:
+        return ""
+    return f" ({retry_count} retr{'y' if retry_count == 1 else 'ies'})"
 
 
 def _notify_capability_check_failed(
