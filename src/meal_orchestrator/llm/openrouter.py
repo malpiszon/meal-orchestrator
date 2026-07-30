@@ -111,6 +111,16 @@ class OpenRouterHttpError(urllib.error.HTTPError):
         self.details = details
 
 
+def _model_fields(request: LlmRequest) -> dict[str, Any]:
+    # OpenRouter's `models` array is a single request in which it tries each model in
+    # order on error (rate limits, downtime, moderation, context length). OpenRouter's
+    # docs never show "model" and "models" sent together, so only send the array when
+    # fallbacks are configured.
+    if request.fallback_models:
+        return {"models": [request.model, *request.fallback_models]}
+    return {"model": request.model}
+
+
 def _build_message_content(
     payload: PromptPayload, feedback: str | None
 ) -> list[dict[str, str]]:
@@ -168,7 +178,7 @@ class OpenRouterClient:
             attempt += 1
             body = json.dumps(
                 {
-                    "model": request.model,
+                    **_model_fields(request),
                     "messages": [
                         {
                             "role": "user",
@@ -176,6 +186,9 @@ class OpenRouterClient:
                         }
                     ],
                     "response_format": _RESPONSE_FORMAT,
+                    # Skip any endpoint that would silently ignore response_format
+                    # rather than risk a non-schema-conforming completion from it.
+                    "provider": {"require_parameters": True},
                 }
             ).encode("utf-8")
             try:

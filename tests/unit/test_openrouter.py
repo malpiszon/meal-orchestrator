@@ -19,11 +19,14 @@ from meal_orchestrator.retries import RetryError
 from tests.unit.helpers import canonical_menu, week_assessment
 
 
-def _make_request(model: str = "openai/gpt-4o-mini") -> LlmRequest:
+def _make_request(
+    model: str = "openai/gpt-4o-mini", fallback_models: list[str] | None = None
+) -> LlmRequest:
     return LlmRequest(
         model=model,
         payload=PromptPayload(user_prompt="Choose the best meals.", menu=canonical_menu()),
         timeout_seconds=30,
+        fallback_models=fallback_models or [],
     )
 
 
@@ -236,6 +239,56 @@ class TestOpenRouterClientGenerate:
             client.generate(_make_request(model="anthropic/claude-haiku-4-5"))
 
         assert captured["body"]["model"] == "anthropic/claude-haiku-4-5"
+
+    def test_sends_only_model_when_no_fallback_models_configured(self) -> None:
+        captured = {}
+
+        def side_effect(req, timeout=None):
+            captured["body"] = json.loads(req.data.decode("utf-8"))
+            return _mock_urlopen(_mock_response(_assessment_json()))
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            client = OpenRouterClient(api_key="test-key")
+            client.generate(_make_request(model="openai/gpt-4o-mini"))
+
+        assert captured["body"]["model"] == "openai/gpt-4o-mini"
+        assert "models" not in captured["body"]
+
+    def test_sends_models_array_when_fallback_models_configured(self) -> None:
+        captured = {}
+
+        def side_effect(req, timeout=None):
+            captured["body"] = json.loads(req.data.decode("utf-8"))
+            return _mock_urlopen(_mock_response(_assessment_json()))
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            client = OpenRouterClient(api_key="test-key")
+            client.generate(
+                _make_request(
+                    model="openai/gpt-4o-mini",
+                    fallback_models=["openai/gpt-4.1-mini", "anthropic/claude-haiku-4-5"],
+                )
+            )
+
+        assert "model" not in captured["body"]
+        assert captured["body"]["models"] == [
+            "openai/gpt-4o-mini",
+            "openai/gpt-4.1-mini",
+            "anthropic/claude-haiku-4-5",
+        ]
+
+    def test_sends_require_parameters_provider_preference(self) -> None:
+        captured = {}
+
+        def side_effect(req, timeout=None):
+            captured["body"] = json.loads(req.data.decode("utf-8"))
+            return _mock_urlopen(_mock_response(_assessment_json()))
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            client = OpenRouterClient(api_key="test-key")
+            client.generate(_make_request())
+
+        assert captured["body"]["provider"] == {"require_parameters": True}
 
     def test_sends_strict_json_schema_response_format(self) -> None:
         captured = {}

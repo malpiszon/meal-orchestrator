@@ -22,14 +22,18 @@ class ConfigError(ValueError):
 
 def load_app_config(path: Path) -> AppConfig:
     data = _load_yaml(path)
+    llm_model = _required(data, "llm", "model")
     return AppConfig(
         runtime=RuntimeConfig(timezone=_required(data, "runtime", "timezone")),
         llm=LlmConfig(
             provider=_required(data, "llm", "provider"),
-            model=_required(data, "llm", "model"),
+            model=llm_model,
             timeout_seconds=int(_required(data, "llm", "timeout_seconds")),
             max_retries=int(_required(data, "llm", "max_retries")),
             dry_run_model=_optional(data, "llm", "dry_run_model"),
+            fallback_models=_parse_fallback_models(
+                _optional(data, "llm", "fallback_models"), llm_model
+            ),
         ),
         default_provider=_required(data, "providers", "default"),
         delivery=DeliveryConfig(
@@ -40,6 +44,16 @@ def load_app_config(path: Path) -> AppConfig:
         ),
         artifacts=_parse_artifacts(data),
     )
+
+
+def _parse_fallback_models(raw: Any, model: str) -> list[str]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or not all(isinstance(item, str) for item in raw):
+        raise ConfigError("llm.fallback_models must be a list of strings")
+    if model in raw:
+        raise ConfigError(f"llm.fallback_models must not include the primary model: {model}")
+    return raw
 
 
 def _parse_artifacts(data: dict[str, Any]) -> ArtifactConfig | None:

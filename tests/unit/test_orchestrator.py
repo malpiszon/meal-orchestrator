@@ -65,7 +65,7 @@ class FailingLlmClient:
         )
 
 
-def _no_capability_check(model: str) -> None:
+def _no_capability_check(model: str, **_kwargs) -> None:
     pass
 
 
@@ -292,6 +292,9 @@ def test_orchestrator_runs_capability_check_with_resolved_model(tmp_path) -> Non
     prompt_file.write_text("Choose meals.", encoding="utf-8")
     captured_models: list[str] = []
 
+    def _capturing_capability_check(model: str, **_kwargs) -> None:
+        captured_models.append(model)
+
     orchestrator = RunOrchestrator(
         app_config=app_config(),
         users=[user_config(prompt_file.relative_to(tmp_path))],
@@ -300,7 +303,7 @@ def test_orchestrator_runs_capability_check_with_resolved_model(tmp_path) -> Non
         llm_client=FakeLlmClient(),
         email_client=FakeEmailClient(),
         discord_client=FakeDiscordClient(),
-        capability_check=captured_models.append,
+        capability_check=_capturing_capability_check,
     )
 
     orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
@@ -312,6 +315,30 @@ def test_orchestrator_runs_capability_check_with_resolved_model(tmp_path) -> Non
     assert captured_models == ["test-model", "test-dry-run-model", "override-model"]
 
 
+def test_orchestrator_runs_capability_check_with_configured_fallback_models(tmp_path) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    captured_fallback_models: list[list[str]] = []
+
+    def _capturing_capability_check(model: str, *, fallback_models=None, **_kwargs) -> None:
+        captured_fallback_models.append(fallback_models)
+
+    orchestrator = RunOrchestrator(
+        app_config=app_config(fallback_models=["openai/gpt-4.1-mini"]),
+        users=[user_config(prompt_file.relative_to(tmp_path))],
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=FakeLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=FakeDiscordClient(),
+        capability_check=_capturing_capability_check,
+    )
+
+    orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert captured_fallback_models == [["openai/gpt-4.1-mini"]]
+
+
 def test_orchestrator_fails_all_users_gracefully_when_capability_check_fails(tmp_path) -> None:
     """A capability-check failure must degrade like every other failure mode.
 
@@ -321,7 +348,7 @@ def test_orchestrator_fails_all_users_gracefully_when_capability_check_fails(tmp
     prompt_file = tmp_path / "prompt.md"
     prompt_file.write_text("Choose meals.", encoding="utf-8")
 
-    def _failing_capability_check(model: str) -> None:
+    def _failing_capability_check(model: str, **_kwargs) -> None:
         raise RuntimeError("model does not support structured outputs")
 
     other_user_prompt = tmp_path / "other_prompt.md"
@@ -361,7 +388,7 @@ def test_capability_check_failure_sends_ops_notification(tmp_path, monkeypatch) 
     monkeypatch.setenv("DISCORD_OPS_WEBHOOK_URL", "https://example.com/ops")
     discord = FakeDiscordClient()
 
-    def _failing_capability_check(model: str) -> None:
+    def _failing_capability_check(model: str, **_kwargs) -> None:
         raise RuntimeError("model does not support structured outputs")
 
     orchestrator = RunOrchestrator(
@@ -390,7 +417,7 @@ def test_capability_check_failure_suppresses_ops_notification_on_dry_run(
     monkeypatch.setenv("DISCORD_OPS_WEBHOOK_URL", "https://example.com/ops")
     discord = FakeDiscordClient()
 
-    def _failing_capability_check(model: str) -> None:
+    def _failing_capability_check(model: str, **_kwargs) -> None:
         raise RuntimeError("model does not support structured outputs")
 
     orchestrator = RunOrchestrator(

@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
+from typing import Protocol
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -29,6 +30,10 @@ from meal_orchestrator.workflow import UserWorkflowExecutor
 logger = logging.getLogger(__name__)
 
 
+class CapabilityCheck(Protocol):
+    def __call__(self, model: str, *, fallback_models: list[str] | None = None) -> None: ...
+
+
 @dataclass(frozen=True)
 class RunOptions:
     user_id: str | None = None
@@ -49,7 +54,7 @@ class RunOrchestrator:
         llm_client: OpenRouterClient | None = None,
         email_client: EmailClient | None = None,
         discord_client: DiscordClient | None = None,
-        capability_check: Callable[[str], None] | None = None,
+        capability_check: CapabilityCheck | None = None,
     ) -> None:
         self.app_config = app_config
         self.users = users
@@ -79,7 +84,7 @@ class RunOrchestrator:
         capability_check = self.capability_check_override or assert_structured_output_supported
         model = self._resolve_model(options)
         try:
-            capability_check(model)
+            capability_check(model, fallback_models=self.app_config.llm.fallback_models)
         except Exception as exc:
             logger.error(
                 "capability check failed: model=%s error=%s",

@@ -207,6 +207,9 @@ class UserWorkflowExecutor:
             model=run_context.llm_model or default_model,
             payload=prompt_payload,
             timeout_seconds=self.app_config.llm.timeout_seconds,
+            # Fallback models are sized/priced for the prod model; carrying them into a
+            # dry run would undercut dry_run_model's whole purpose of keeping cost down.
+            fallback_models=[] if run_context.dry_run else self.app_config.llm.fallback_models,
         )
 
     def _generate_plan(

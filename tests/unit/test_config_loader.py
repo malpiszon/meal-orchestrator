@@ -69,6 +69,131 @@ delivery:
     assert app.llm.dry_run_model == "test-cheap-model"
 
 
+def test_fallback_models_defaults_to_empty_list(tmp_path) -> None:
+    path = tmp_path / "app.yaml"
+    path.write_text(
+        """
+runtime:
+  timezone: Europe/Warsaw
+llm:
+  provider: openrouter
+  model: test
+  timeout_seconds: 30
+  max_retries: 1
+providers:
+  default: example_provider
+delivery:
+  email_from: test@example.com
+  operational_discord_webhook_env: DISCORD_OPS_WEBHOOK_URL
+""",
+        encoding="utf-8",
+    )
+    app = load_app_config(path)
+    assert app.llm.fallback_models == []
+
+
+def test_fallback_models_loaded_when_present(tmp_path) -> None:
+    path = tmp_path / "app.yaml"
+    path.write_text(
+        """
+runtime:
+  timezone: Europe/Warsaw
+llm:
+  provider: openrouter
+  model: test
+  timeout_seconds: 30
+  max_retries: 1
+  fallback_models:
+    - openai/gpt-4.1-mini
+    - anthropic/claude-haiku-4-5
+providers:
+  default: example_provider
+delivery:
+  email_from: test@example.com
+  operational_discord_webhook_env: DISCORD_OPS_WEBHOOK_URL
+""",
+        encoding="utf-8",
+    )
+    app = load_app_config(path)
+    assert app.llm.fallback_models == ["openai/gpt-4.1-mini", "anthropic/claude-haiku-4-5"]
+
+
+def test_fallback_models_rejects_non_list(tmp_path) -> None:
+    path = tmp_path / "app.yaml"
+    path.write_text(
+        """
+runtime:
+  timezone: Europe/Warsaw
+llm:
+  provider: openrouter
+  model: test
+  timeout_seconds: 30
+  max_retries: 1
+  fallback_models: "openai/gpt-4.1-mini"
+providers:
+  default: example_provider
+delivery:
+  email_from: test@example.com
+  operational_discord_webhook_env: DISCORD_OPS_WEBHOOK_URL
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="fallback_models must be a list of strings"):
+        load_app_config(path)
+
+
+def test_fallback_models_rejects_non_string_items(tmp_path) -> None:
+    path = tmp_path / "app.yaml"
+    path.write_text(
+        """
+runtime:
+  timezone: Europe/Warsaw
+llm:
+  provider: openrouter
+  model: test
+  timeout_seconds: 30
+  max_retries: 1
+  fallback_models:
+    - openai/gpt-4.1-mini
+    - 123
+providers:
+  default: example_provider
+delivery:
+  email_from: test@example.com
+  operational_discord_webhook_env: DISCORD_OPS_WEBHOOK_URL
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="fallback_models must be a list of strings"):
+        load_app_config(path)
+
+
+def test_fallback_models_rejects_primary_model_as_its_own_fallback(tmp_path) -> None:
+    path = tmp_path / "app.yaml"
+    path.write_text(
+        """
+runtime:
+  timezone: Europe/Warsaw
+llm:
+  provider: openrouter
+  model: test
+  timeout_seconds: 30
+  max_retries: 1
+  fallback_models:
+    - openai/gpt-4.1-mini
+    - test
+providers:
+  default: example_provider
+delivery:
+  email_from: test@example.com
+  operational_discord_webhook_env: DISCORD_OPS_WEBHOOK_URL
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="must not include the primary model"):
+        load_app_config(path)
+
+
 def test_artifacts_config_missing_path_raises(tmp_path) -> None:
     path = tmp_path / "app.yaml"
     path.write_text(
