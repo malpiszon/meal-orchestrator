@@ -19,7 +19,7 @@ from meal_orchestrator.domain import (
 from meal_orchestrator.llm import EmptyLlmResponseError, LlmFailureDetails
 from meal_orchestrator.providers import ProviderNormalizationError
 from meal_orchestrator.rendering.html import render_html
-from meal_orchestrator.rendering.labels import DAY_EMOJI
+from meal_orchestrator.rendering.labels import SUBJECT_EMOJI
 from meal_orchestrator.rendering.plain_text import render_plain_text
 from meal_orchestrator.retries import RetryError
 from meal_orchestrator.workflow import UserWorkflowExecutor
@@ -129,7 +129,7 @@ def test_non_dry_run_calls_llm_and_email(tmp_path) -> None:
     assert email.messages[0].html_body == render_html(
         week_assessment(canonical_menu()), canonical_menu()
     )
-    assert email.messages[0].subject == f"{DAY_EMOJI} Meal plan for 2026-06-01 – 2026-06-05"
+    assert email.messages[0].subject == f"{SUBJECT_EMOJI} Meal plan for 2026-06-01 – 2026-06-05"
     assert email.idempotency_keys == ["run-1:alan:email"]
 
 
