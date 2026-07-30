@@ -5,6 +5,7 @@ from datetime import date
 from meal_orchestrator.domain.meal_types import CANONICAL_MEAL_TYPES
 
 DAY_EMOJI = "\U0001F37D️"  # 🍽️
+SUBJECT_EMOJI = "\U0001F9D1‍\U0001F373"  # 🧑‍🍳
 
 # Covers every canonical meal type even though any given user typically purchases
 # only a subset — shared across renderers so a future format (HTML, webpage, ...)

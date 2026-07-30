@@ -36,7 +36,7 @@ from meal_orchestrator.providers import (
     ProviderNormalizationError,
 )
 from meal_orchestrator.rendering.html import render_html
-from meal_orchestrator.rendering.labels import DAY_EMOJI
+from meal_orchestrator.rendering.labels import SUBJECT_EMOJI
 from meal_orchestrator.rendering.plain_text import render_plain_text
 
 logger = logging.getLogger(__name__)
@@ -229,7 +229,7 @@ class UserWorkflowExecutor:
                     to=user.email,
                     from_address=self.app_config.delivery.email_from,
                     subject=(
-                        f"{DAY_EMOJI} Meal plan for {run_context.week_start.isoformat()}"
+                        f"{SUBJECT_EMOJI} Meal plan for {run_context.week_start.isoformat()}"
                         f" – {run_context.week_end.isoformat()}"
                     ),
                     body=render_plain_text(llm_result.structured, menu),
