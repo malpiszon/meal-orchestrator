@@ -163,3 +163,4 @@ class WorkflowResult:
     status: WorkflowStatus
     detail: str | None = None
     failed_step: str | None = None
+    retry_count: int | None = None

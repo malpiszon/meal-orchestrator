@@ -4,7 +4,9 @@ from dataclasses import replace
 from datetime import date
 
 from meal_orchestrator.domain import LlmResult, ProviderMenuRequest, ProviderResult, WorkflowStatus
+from meal_orchestrator.llm import EmptyLlmResponseError, LlmFailureDetails
 from meal_orchestrator.orchestrator import RunOptions, RunOrchestrator
+from meal_orchestrator.retries import RetryError
 from tests.unit.helpers import (
     FakeDiscordClient,
     FakeEmailClient,
@@ -34,8 +36,33 @@ class FailingProvider:
 
 
 class FakeLlmClient:
-    def generate(self, request):
-        return LlmResult(structured=week_assessment(request.payload.menu), model=request.model)
+    def __init__(self, *, attempt: int = 1) -> None:
+        self.attempt = attempt
+
+    def generate(self, request, **_kwargs):
+        return LlmResult(
+            structured=week_assessment(request.payload.menu),
+            model=request.model,
+            response_metadata={"attempt": self.attempt},
+        )
+
+
+class FailingLlmClient:
+    def generate(self, request, **_kwargs):
+        raise RetryError(
+            "openrouter failed after 3 attempt(s)",
+            EmptyLlmResponseError(
+                LlmFailureDetails(
+                    reason="empty_message_content",
+                    attempt=3,
+                    response={
+                        "id": "gen-example",
+                        "model": request.model,
+                        "choices": [{"message": {"content": None}}],
+                    },
+                )
+            ),
+        )
 
 
 def _no_capability_check(model: str) -> None:
@@ -97,6 +124,33 @@ def test_orchestrator_sends_operational_notification_on_completed(tmp_path, monk
     assert "completed" in ops_msg.description
 
 
+def test_operational_notification_includes_retry_count(tmp_path, monkeypatch) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    monkeypatch.setenv("DISCORD_OPS_WEBHOOK_URL", "https://example.com/ops")
+    monkeypatch.setenv("DISCORD_USER_WEBHOOK_URL", "https://example.com/user")
+    discord = FakeDiscordClient()
+
+    orchestrator = RunOrchestrator(
+        app_config=app_config(),
+        users=[user_config(prompt_file.relative_to(tmp_path))],
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=FakeLlmClient(attempt=3),
+        email_client=FakeEmailClient(),
+        discord_client=discord,
+        capability_check=_no_capability_check,
+    )
+
+    result = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert result[0].status == WorkflowStatus.COMPLETED
+    ops_msg = discord.messages[-1]
+    assert "(2 retries)" in ops_msg.description
+    user_msg = next(m for m in discord.messages if m.webhook_env != "DISCORD_OPS_WEBHOOK_URL")
+    assert "retr" not in user_msg.description
+
+
 def test_orchestrator_sends_operational_notification_on_failure(tmp_path, monkeypatch) -> None:
     prompt_file = tmp_path / "prompt.md"
     prompt_file.write_text("Choose meals.", encoding="utf-8")
@@ -121,6 +175,34 @@ def test_orchestrator_sends_operational_notification_on_failure(tmp_path, monkey
     assert discord.messages[0].webhook_env == "DISCORD_OPS_WEBHOOK_URL"
     assert "step provider" in discord.messages[0].description
     assert "provider exploded" in discord.messages[0].description
+
+
+def test_operational_notification_includes_retry_count_on_llm_failure(
+    tmp_path, monkeypatch
+) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    monkeypatch.setenv("DISCORD_OPS_WEBHOOK_URL", "https://example.com/ops")
+    monkeypatch.setenv("DISCORD_USER_WEBHOOK_URL", "https://example.com/user")
+    discord = FakeDiscordClient()
+
+    orchestrator = RunOrchestrator(
+        app_config=app_config(),
+        users=[user_config(prompt_file.relative_to(tmp_path))],
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=FailingLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=discord,
+        capability_check=_no_capability_check,
+    )
+
+    result = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert result[0].status == WorkflowStatus.FAILED
+    ops_msg = discord.messages[0]
+    assert ops_msg.webhook_env == "DISCORD_OPS_WEBHOOK_URL"
+    assert "(2 retries)" in ops_msg.description
 
 
 def test_orchestrator_skips_operational_notification_when_env_var_not_set(
@@ -163,7 +245,7 @@ def test_orchestrator_wires_configured_max_retries_into_llm_client(monkeypatch, 
         def __init__(self, **kwargs) -> None:
             captured_kwargs.update(kwargs)
 
-        def generate(self, request):
+        def generate(self, request, **_kwargs):
             return LlmResult(structured=week_assessment(request.payload.menu), model=request.model)
 
     monkeypatch.setattr("meal_orchestrator.orchestrator.OpenRouterClient", SpyOpenRouterClient)

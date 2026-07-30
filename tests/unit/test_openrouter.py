@@ -425,6 +425,71 @@ class TestOpenRouterClientGenerate:
         assert call_count == 2
         assert result.structured == week_assessment(canonical_menu())
 
+    def test_on_attempt_called_for_each_attempt_with_outcome(self) -> None:
+        call_count = 0
+
+        def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _mock_urlopen(_mock_response(None))
+            return _mock_urlopen(_mock_response(_assessment_json()))
+
+        attempts: list[tuple] = []
+
+        def on_attempt(attempt, feedback, response, outcome):
+            attempts.append((attempt, feedback, response, outcome))
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            with patch("time.sleep"):
+                client = OpenRouterClient(api_key="test-key", max_retries=3)
+                result = client.generate(_make_request(), on_attempt=on_attempt)
+
+        assert result.structured == week_assessment(canonical_menu())
+        assert len(attempts) == 2
+        first_attempt, first_feedback, first_response, first_outcome = attempts[0]
+        assert first_attempt == 1
+        assert first_feedback is None
+        assert first_response is not None
+        assert first_outcome["accepted"] is False
+        assert first_outcome["reason"] == "empty_message_content"
+
+        second_attempt, second_feedback, second_response, second_outcome = attempts[1]
+        assert second_attempt == 2
+        assert second_feedback is None
+        assert second_response is not None
+        assert second_outcome == {"accepted": True}
+
+    def test_on_attempt_called_for_network_error_and_eventually_succeeds(self) -> None:
+        call_count = 0
+
+        def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise urllib.error.URLError("connection refused")
+            return _mock_urlopen(_mock_response(_assessment_json()))
+
+        attempts: list[tuple] = []
+
+        def on_attempt(attempt, feedback, response, outcome):
+            attempts.append((attempt, feedback, response, outcome))
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            with patch("time.sleep"):
+                client = OpenRouterClient(api_key="test-key", max_retries=3)
+                result = client.generate(_make_request(), on_attempt=on_attempt)
+
+        assert result.structured == week_assessment(canonical_menu())
+        assert len(attempts) == 2
+        first_attempt, first_feedback, first_response, first_outcome = attempts[0]
+        assert first_attempt == 1
+        assert first_feedback is None
+        assert first_response is None
+        assert first_outcome["accepted"] is False
+        assert first_outcome["reason"] == "network_error"
+        assert "connection refused" in first_outcome["error"]
+
     def test_raises_retry_error_when_content_never_matches_schema(self) -> None:
         with patch(
             "urllib.request.urlopen",

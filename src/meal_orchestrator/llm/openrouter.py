@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import urllib.error
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -125,7 +126,12 @@ class OpenRouterClient:
         self._api_key = api_key if api_key is not None else os.environ["OPENROUTER_API_KEY"]
         self._max_retries = max_retries
 
-    def generate(self, request: LlmRequest) -> LlmResult:
+    def generate(
+        self,
+        request: LlmRequest,
+        *,
+        on_attempt: Callable[[int, str | None, Any, dict[str, Any]], None] | None = None,
+    ) -> LlmResult:
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
@@ -156,9 +162,24 @@ class OpenRouterClient:
                     _API_URL, headers=headers, body=body, timeout_seconds=request.timeout_seconds
                 )
             except urllib.error.HTTPError as exc:
-                raise _openrouter_http_error(exc, attempt) from exc
+                error = _openrouter_http_error(exc, attempt)
+                if on_attempt is not None:
+                    on_attempt(attempt, feedback, error.details.response, _rejected_outcome(error))
+                raise error from exc
+            except (urllib.error.URLError, TimeoutError) as exc:
+                if on_attempt is not None:
+                    on_attempt(attempt, feedback, None, _network_error_outcome(exc))
+                raise
             response = json.loads(raw.decode("utf-8"))
-            return response, _response_structured(response, request.payload.menu, attempt)
+            try:
+                assessment = _response_structured(response, request.payload.menu, attempt)
+            except OpenRouterResponseError as exc:
+                if on_attempt is not None:
+                    on_attempt(attempt, feedback, response, _rejected_outcome(exc))
+                raise
+            if on_attempt is not None:
+                on_attempt(attempt, feedback, response, {"accepted": True})
+            return response, assessment
 
         def _on_retry(exc: Exception) -> None:
             nonlocal feedback
@@ -198,6 +219,22 @@ def _build_result(
         token_usage=token_usage,
         response_metadata=_response_metadata(response, attempt, compact_routing_metadata=True),
     )
+
+
+def _rejected_outcome(exc: OpenRouterResponseError | OpenRouterHttpError) -> dict[str, Any]:
+    # "attempt" is dropped here — the caller already knows the attempt number and is the
+    # single source of truth for it, so we don't let this metadata silently override it.
+    metadata = {key: value for key, value in exc.details.to_metadata().items() if key != "attempt"}
+    outcome: dict[str, Any] = {"accepted": False, **metadata}
+    if isinstance(exc, StructuredOutputError):
+        outcome["parse_error"] = exc.parse_error
+    if isinstance(exc, IncompleteAssessmentError):
+        outcome["problems"] = exc.problems
+    return outcome
+
+
+def _network_error_outcome(exc: Exception) -> dict[str, Any]:
+    return {"accepted": False, "reason": "network_error", "error": str(exc)}
 
 
 def _feedback_for(exc: OpenRouterResponseError) -> str | None:

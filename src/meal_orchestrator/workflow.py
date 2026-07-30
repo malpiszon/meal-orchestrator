@@ -106,7 +106,10 @@ class UserWorkflowExecutor:
 
             logger.info("user workflow completed", extra={**log_context, "step": "complete"})
             state.status = WorkflowStatus.COMPLETED
-            return WorkflowResult(user_id=user.id, status=WorkflowStatus.COMPLETED)
+            retry_count = (llm_result.response_metadata or {}).get("attempt", 1) - 1
+            return WorkflowResult(
+                user_id=user.id, status=WorkflowStatus.COMPLETED, retry_count=retry_count
+            )
         except ProviderNormalizationError as exc:
             if exc.raw_response is not None:
                 artifacts.save_provider_raw(exc.raw_response)
@@ -142,11 +145,13 @@ class UserWorkflowExecutor:
                 exc_info=True,
                 extra={**log_context, "step": "failed", "error": state.error},
             )
+            retry_count = state.llm_failure.attempt - 1 if state.llm_failure is not None else None
             return WorkflowResult(
                 user_id=user.id,
                 status=WorkflowStatus.FAILED,
                 detail=state.error,
                 failed_step=state.failed_step,
+                retry_count=retry_count,
             )
         finally:
             self._save_metadata(artifacts, user, run_context, state)
@@ -207,7 +212,15 @@ class UserWorkflowExecutor:
     def _generate_plan(
         self, request: LlmRequest, artifacts: RunArtifacts, log_context: dict
     ) -> LlmResult:
-        result = self.llm_client.generate(request)
+        def _on_attempt(
+            attempt: int, feedback: str | None, response: object, outcome: dict
+        ) -> None:
+            artifacts.save_llm_attempt(
+                attempt,
+                {"attempt": attempt, "feedback_sent": feedback, "response": response, **outcome},
+            )
+
+        result = self.llm_client.generate(request, on_attempt=_on_attempt)
         artifacts.save_llm_response(result)
         logger.info("llm result generated", extra={**log_context, "step": "llm"})
         return result
