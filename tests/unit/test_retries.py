@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 from meal_orchestrator.retries import RetryError, with_retries
@@ -150,6 +152,25 @@ def test_on_retry_not_called_on_final_exhausted_attempt() -> None:
     # Two attempts total, but only one retry happens (before attempt 2) — the
     # final failing attempt exhausts retries and must not invoke on_retry.
     assert len(calls) == 1
+
+
+def test_delay_seconds_override_controls_sleep_duration() -> None:
+    sleeps: list[float] = []
+
+    def fn():
+        raise OSError("always fails")
+
+    with patch("time.sleep", side_effect=sleeps.append):
+        with pytest.raises(RetryError):
+            with_retries(
+                fn,
+                max_attempts=3,
+                base_delay_seconds=1,
+                retryable=_always_retryable,
+                delay_seconds=lambda exc, attempt: attempt * 10.0,
+            )
+
+    assert sleeps == [10.0, 20.0]
 
 
 def test_on_retry_not_called_for_non_retryable_exception() -> None:
