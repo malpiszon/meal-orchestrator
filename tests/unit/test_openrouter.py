@@ -81,6 +81,26 @@ def _mock_partial_response(finish_reason: str) -> bytes:
     ).encode("utf-8")
 
 
+def _mock_error_response(error_type: str) -> bytes:
+    return json.dumps(
+        {
+            "id": "gen-example",
+            "model": "openai/gpt-4o-mini",
+            "choices": [
+                {
+                    "message": {"content": "Partial meal plan"},
+                    "finish_reason": "error",
+                    "error": {
+                        "code": 429,
+                        "message": "rate limited",
+                        "metadata": {"error_type": error_type},
+                    },
+                }
+            ],
+        }
+    ).encode("utf-8")
+
+
 def _mock_urlopen(response_body: bytes):
     mock_resp = MagicMock()
     mock_resp.read.return_value = response_body
@@ -328,6 +348,7 @@ class TestOpenRouterClientGenerate:
         assert details.to_metadata() == {
             "reason": "empty_message_content",
             "http_status": None,
+            "error_type": None,
             "attempt": 3,
             "generation_id": "gen-example",
             "model": "openai/gpt-4o-mini",
@@ -368,6 +389,74 @@ class TestOpenRouterClientGenerate:
         assert urlopen.call_count == 1
         assert exc_info.value.details.reason == f"finish_reason_{finish_reason}"
 
+    def test_retries_finish_reason_error_with_rate_limit_error_type(self) -> None:
+        with patch(
+            "urllib.request.urlopen",
+            return_value=_mock_urlopen(_mock_error_response("rate_limit_exceeded")),
+        ) as urlopen:
+            with patch("time.sleep") as sleep:
+                client = OpenRouterClient(api_key="test-key", max_retries=3)
+                with pytest.raises(RetryError) as exc_info:
+                    client.generate(_make_request())
+
+        assert urlopen.call_count == 3
+        assert (
+            exc_info.value.last_exception.details.reason
+            == "finish_reason_error_rate_limit_exceeded"
+        )
+        # Rate limits get a much longer backoff than the default transient-error delay.
+        assert [call.args[0] for call in sleep.call_args_list] == [15.0, 30.0]
+
+    def test_retries_finish_reason_error_with_unspecified_error_type_at_default_delay(
+        self,
+    ) -> None:
+        with patch(
+            "urllib.request.urlopen", return_value=_mock_urlopen(_mock_partial_response("error"))
+        ) as urlopen:
+            with patch("time.sleep") as sleep:
+                client = OpenRouterClient(api_key="test-key", max_retries=3)
+                with pytest.raises(RetryError):
+                    client.generate(_make_request())
+
+        assert urlopen.call_count == 3
+        assert [call.args[0] for call in sleep.call_args_list] == [1.0, 2.0]
+
+    def test_includes_upstream_error_message_in_failure_detail(self) -> None:
+        with patch(
+            "urllib.request.urlopen",
+            return_value=_mock_urlopen(_mock_error_response("rate_limit_exceeded")),
+        ):
+            with patch("time.sleep"):
+                client = OpenRouterClient(api_key="test-key", max_retries=1)
+                with pytest.raises(RetryError) as exc_info:
+                    client.generate(_make_request())
+
+        assert "rate limited" in str(exc_info.value)
+
+    @pytest.mark.parametrize(
+        "error_type",
+        [
+            "authentication",
+            "payment_required",
+            "permission_denied",
+            "context_length_exceeded",
+            "content_policy_violation",
+        ],
+    )
+    def test_rejects_finish_reason_error_with_permanent_error_type_immediately(
+        self, error_type: str
+    ) -> None:
+        with patch(
+            "urllib.request.urlopen",
+            return_value=_mock_urlopen(_mock_error_response(error_type)),
+        ) as urlopen:
+            client = OpenRouterClient(api_key="test-key", max_retries=3)
+            with pytest.raises(OpenRouterResponseError) as exc_info:
+                client.generate(_make_request())
+
+        assert urlopen.call_count == 1
+        assert exc_info.value.details.reason == f"finish_reason_error_{error_type}"
+
     def test_preserves_structured_http_error_details(self) -> None:
         http_error = urllib.error.HTTPError(
             url="https://openrouter.ai", code=429, msg="Too Many Requests", hdrs={}, fp=None  # type: ignore[arg-type]
@@ -387,6 +476,59 @@ class TestOpenRouterClientGenerate:
             "code": 429,
             "message": "Rate limit exceeded",
         }
+
+    def test_retries_genuine_http_429_with_slow_clearing_delay(self) -> None:
+        http_error = urllib.error.HTTPError(
+            url="https://openrouter.ai", code=429, msg="Too Many Requests", hdrs={}, fp=None  # type: ignore[arg-type]
+        )
+        http_error.response_body = json.dumps(
+            {"error": {"code": 429, "message": "Rate limit exceeded"}}
+        )
+
+        with patch("meal_orchestrator.llm.openrouter.post_json", side_effect=http_error):
+            with patch("time.sleep") as sleep:
+                client = OpenRouterClient(api_key="test-key", max_retries=3)
+                with pytest.raises(RetryError):
+                    client.generate(_make_request())
+
+        # A genuine HTTP 429 must get the same slow-clearing backoff as the
+        # embedded-error-in-a-200 shape, even though this response body carries no
+        # error_type metadata — the HTTP status alone is enough to treat it as such.
+        assert [call.args[0] for call in sleep.call_args_list] == [15.0, 30.0]
+
+    def test_includes_truncated_upstream_error_message_in_failure_detail(self) -> None:
+        long_message = "x" * 400
+
+        def _mock_long_error_response() -> bytes:
+            return json.dumps(
+                {
+                    "id": "gen-example",
+                    "model": "openai/gpt-4o-mini",
+                    "choices": [
+                        {
+                            "message": {"content": "Partial meal plan"},
+                            "finish_reason": "error",
+                            "error": {
+                                "code": 429,
+                                "message": long_message,
+                                "metadata": {"error_type": "rate_limit_exceeded"},
+                            },
+                        }
+                    ],
+                }
+            ).encode("utf-8")
+
+        with patch(
+            "urllib.request.urlopen", return_value=_mock_urlopen(_mock_long_error_response())
+        ):
+            with patch("time.sleep"):
+                client = OpenRouterClient(api_key="test-key", max_retries=1)
+                with pytest.raises(RetryError) as exc_info:
+                    client.generate(_make_request())
+
+        message = str(exc_info.value)
+        assert long_message not in message
+        assert "x" * 300 + "…" in message
 
     def test_non_retryable_error_raised_immediately(self) -> None:
         http_401 = urllib.error.HTTPError(

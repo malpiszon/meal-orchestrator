@@ -26,6 +26,25 @@ _API_URL = "https://openrouter.ai/api/v1/chat/completions"
 _BASE_DELAY = 1.0
 _BACKOFF_FACTOR = 2.0
 
+# OpenRouter's documented error_type taxonomy (openrouter.ai/docs/api-reference/errors)
+# for errors embedded in choices[].error when finish_reason == "error". Types outside
+# this set (including none at all, e.g. a bare provider timeout) are treated as
+# transient and retried, matching prior behavior.
+_NON_RETRYABLE_FINISH_ERROR_TYPES = frozenset(
+    {
+        "authentication",
+        "payment_required",
+        "permission_denied",
+        "context_length_exceeded",
+        "content_policy_violation",
+    }
+)
+
+# These clear on their own but rarely within a couple of seconds, so they get a much
+# longer backoff than a generic transient error (e.g. a dropped connection).
+_SLOW_CLEARING_ERROR_TYPES = frozenset({"rate_limit_exceeded", "provider_overloaded"})
+_SLOW_CLEARING_BASE_DELAY = 15.0
+
 _SCAFFOLDING_INSTRUCTION = (
     "Assess every meal variant present in the menu JSON below: give each one a score "
     "and up to two short justification points. Do not select a single winner and skip "
@@ -41,11 +60,13 @@ class LlmFailureDetails:
     attempt: int
     response: Any
     http_status: int | None = None
+    error_type: str | None = None
 
     def to_metadata(self) -> dict[str, Any]:
         return {
             "reason": self.reason,
             "http_status": self.http_status,
+            "error_type": self.error_type,
             **_response_metadata(self.response, self.attempt),
         }
 
@@ -197,8 +218,25 @@ class OpenRouterClient:
             or (isinstance(exc, OpenRouterResponseError) and exc.retryable),
             operation_name=f"openrouter generate model={request.model}",
             on_retry=_on_retry,
+            delay_seconds=_retry_delay_seconds,
         )
         return _build_result(response, assessment, attempt, request.model)
+
+
+def _retry_delay_seconds(exc: Exception, attempt: int) -> float:
+    if _is_slow_clearing(exc):
+        return _SLOW_CLEARING_BASE_DELAY * (_BACKOFF_FACTOR ** (attempt - 1))
+    return _BASE_DELAY * (_BACKOFF_FACTOR ** (attempt - 1))
+
+
+def _is_slow_clearing(exc: Exception) -> bool:
+    details = getattr(exc, "details", None)
+    if isinstance(details, LlmFailureDetails) and details.error_type in _SLOW_CLEARING_ERROR_TYPES:
+        return True
+    # A genuine HTTP 429 is the canonical shape for rate limiting — treat it as
+    # slow-clearing even when the response body carries no error_type metadata,
+    # rather than relying solely on the embedded-error-in-a-200 shape above.
+    return isinstance(exc, urllib.error.HTTPError) and exc.code == 429
 
 
 def _build_result(
@@ -278,15 +316,36 @@ def _response_text(response: Any, attempt: int) -> str:
     choice = _first_choice(response) if isinstance(response, dict) else {}
     finish_reason = choice.get("finish_reason")
     if finish_reason in {"content_filter", "error", "length"}:
+        error_type = _choice_error_type(choice) if finish_reason == "error" else None
+        reason = f"finish_reason_{finish_reason}"
+        if error_type is not None:
+            reason = f"{reason}_{error_type}"
         raise OpenRouterResponseError(
             LlmFailureDetails(
-                reason=f"finish_reason_{finish_reason}",
+                reason=reason,
                 attempt=attempt,
                 response=response,
+                error_type=error_type,
             ),
-            retryable=finish_reason == "error",
+            retryable=(
+                finish_reason == "error" and error_type not in _NON_RETRYABLE_FINISH_ERROR_TYPES
+            ),
         )
     return text
+
+
+def _choice_error_type(choice: dict[str, Any]) -> str | None:
+    return _error_type_from_error(choice.get("error"))
+
+
+def _error_type_from_error(error: Any) -> str | None:
+    if not isinstance(error, dict):
+        return None
+    metadata = error.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+    error_type = metadata.get("error_type")
+    return error_type if isinstance(error_type, str) else None
 
 
 def _empty_response_error(reason: str, attempt: int, response: Any) -> EmptyLlmResponseError:
@@ -321,6 +380,9 @@ def _openrouter_http_error(
         response = json.loads(response_body)
     except json.JSONDecodeError:
         response = {"error": {"code": error.code, "message": response_body or error.reason}}
+    error_type = (
+        _error_type_from_error(response.get("error")) if isinstance(response, dict) else None
+    )
     return OpenRouterHttpError(
         error,
         LlmFailureDetails(
@@ -328,6 +390,7 @@ def _openrouter_http_error(
             attempt=attempt,
             response=response,
             http_status=error.code,
+            error_type=error_type,
         ),
     )
 
@@ -387,16 +450,32 @@ def _compact_routing_metadata(metadata: Any) -> Any:
     return compact
 
 
+_UPSTREAM_MESSAGE_MAX_CHARS = 300
+
+
 def _failure_message(details: LlmFailureDetails) -> str:
     metadata = details.to_metadata()
-    context = ", ".join(
-        f"{key}={value}"
-        for key, value in (
-            ("finish_reason", metadata["finish_reason"]),
-            ("native_finish_reason", metadata["native_finish_reason"]),
-            ("generation_id", metadata["generation_id"]),
-        )
-        if value is not None
-    )
+    # Omit finish_reason here when `reason` already spells it out (e.g.
+    # "finish_reason_error_rate_limit_exceeded") to avoid saying the same thing twice.
+    # This relies on `reason` being built as f"finish_reason_{finish_reason}[...]" at
+    # each raise site in _response_text — keep that format in sync with this check.
+    context_fields = [("native_finish_reason", metadata["native_finish_reason"])]
+    if not details.reason.startswith("finish_reason_"):
+        context_fields.insert(0, ("finish_reason", metadata["finish_reason"]))
+    context_fields.append(("generation_id", metadata["generation_id"]))
+    context = ", ".join(f"{key}={value}" for key, value in context_fields if value is not None)
     suffix = f" ({context})" if context else ""
-    return f"OpenRouter response has {details.reason.replace('_', ' ')}{suffix}"
+    upstream_message = _upstream_error_message(metadata)
+    detail = f": {upstream_message}" if upstream_message else ""
+    return f"OpenRouter response has {details.reason.replace('_', ' ')}{suffix}{detail}"
+
+
+def _upstream_error_message(metadata: dict[str, Any]) -> str | None:
+    for key in ("choice_error", "response_error"):
+        error = metadata.get(key)
+        if isinstance(error, dict) and isinstance(error.get("message"), str) and error["message"]:
+            message: str = error["message"]
+            if len(message) > _UPSTREAM_MESSAGE_MAX_CHARS:
+                message = message[:_UPSTREAM_MESSAGE_MAX_CHARS].rstrip() + "…"
+            return message
+    return None

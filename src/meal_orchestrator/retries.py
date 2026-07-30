@@ -34,6 +34,7 @@ def with_retries[T](
     retryable: Callable[[Exception], bool],
     operation_name: str = "operation",
     on_retry: Callable[[Exception], None] | None = None,
+    delay_seconds: Callable[[Exception, int], float] | None = None,
 ) -> T:  # noqa: UP047 — `from __future__ import annotations` prevents PEP 695 syntax
     """Execute fn with exponential backoff retries.
 
@@ -48,6 +49,10 @@ def with_retries[T](
             each retry (not on the final, non-retried attempt). Lets a caller adapt
             its next attempt (e.g. add corrective context to a request) without
             reimplementing the retry loop itself.
+        delay_seconds: Optional override for the sleep duration before a retry,
+            called with (exception, attempt). Lets a caller use a longer delay for
+            exceptions known to need more time to clear (e.g. upstream rate limits)
+            instead of the default exponential backoff shared by every exception.
 
     Returns:
         The return value of fn on success.
@@ -70,16 +75,20 @@ def with_retries[T](
             if attempt < max_attempts:
                 if on_retry is not None:
                     on_retry(exc)
+                if delay_seconds is not None:
+                    current_delay = delay_seconds(exc, attempt)
+                else:
+                    current_delay = delay
+                    delay *= backoff_factor
                 logger.warning(
                     "%s failed (attempt %d/%d): %s — retrying in %.1fs",
                     operation_name,
                     attempt,
                     max_attempts,
                     exc,
-                    delay,
+                    current_delay,
                 )
-                time.sleep(delay)
-                delay *= backoff_factor
+                time.sleep(current_delay)
             else:
                 logger.error(
                     "%s failed (attempt %d/%d): %s — no more retries",
