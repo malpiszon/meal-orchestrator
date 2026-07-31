@@ -345,6 +345,47 @@ class TestOpenRouterClientGenerate:
 
         assert call_count == 4
 
+    def test_final_error_names_every_candidate_model_tried(self) -> None:
+        # Naming only the last model tried would hide that the primary was attempted
+        # (and failed for a possibly unrelated reason) before falling back.
+        call_count = 0
+
+        def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return _mock_urlopen(_mock_error_response("rate_limit_exceeded"))
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            with patch("time.sleep"):
+                client = OpenRouterClient(api_key="test-key", max_retries=2)
+                with pytest.raises(RetryError) as exc_info:
+                    client.generate(
+                        _make_request(
+                            model="openai/gpt-4o-mini",
+                            fallback_models=["openai/gpt-4.1-mini", "anthropic/claude-haiku-4-5"],
+                        )
+                    )
+
+        message = str(exc_info.value)
+        assert "3 candidate model(s)" in message
+        assert "openai/gpt-4o-mini" in message
+        assert "openai/gpt-4.1-mini" in message
+        assert "anthropic/claude-haiku-4-5" in message
+        assert isinstance(exc_info.value.last_exception, OpenRouterResponseError)
+
+    def test_final_error_message_unchanged_with_no_fallback_configured(self) -> None:
+        # Preserve the exact single-model message shape when no fallback is
+        # configured — no "exhausted all N candidate model(s)" wrapping.
+        with patch(
+            "urllib.request.urlopen", return_value=_mock_urlopen(_mock_partial_response("error"))
+        ):
+            with patch("time.sleep"):
+                client = OpenRouterClient(api_key="test-key", max_retries=2)
+                with pytest.raises(RetryError) as exc_info:
+                    client.generate(_make_request())
+
+        assert "candidate model(s)" not in str(exc_info.value)
+
     def test_attempt_counter_keeps_incrementing_across_fallback_switch(self) -> None:
         bodies = []
 

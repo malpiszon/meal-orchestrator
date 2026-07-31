@@ -247,6 +247,17 @@ class OpenRouterClient:
                 continue
             return _build_result(response, assessment, attempt, model)
         assert last_retry_error is not None  # candidates is never empty
+        if len(candidates) > 1:
+            # Naming only the last candidate here would hide that other models were
+            # tried first and failed for unrelated reasons (e.g. the primary was
+            # rate-limited while the fallback separately produced a bad completion) —
+            # callers (ops notifications, logs) only see this final message.
+            tried = ", ".join(candidates)
+            raise RetryError(
+                f"openrouter generate exhausted all {len(candidates)} candidate model(s) "
+                f"({tried}): {last_retry_error.last_exception}",
+                last_exception=last_retry_error.last_exception,
+            ) from last_retry_error
         raise last_retry_error
 
 

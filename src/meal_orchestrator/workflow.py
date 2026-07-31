@@ -108,7 +108,10 @@ class UserWorkflowExecutor:
             state.status = WorkflowStatus.COMPLETED
             retry_count = (llm_result.response_metadata or {}).get("attempt", 1) - 1
             return WorkflowResult(
-                user_id=user.id, status=WorkflowStatus.COMPLETED, retry_count=retry_count
+                user_id=user.id,
+                status=WorkflowStatus.COMPLETED,
+                retry_count=retry_count,
+                model=llm_result.model,
             )
         except ProviderNormalizationError as exc:
             if exc.raw_response is not None:

@@ -165,3 +165,4 @@ class WorkflowResult:
     detail: str | None = None
     failed_step: str | None = None
     retry_count: int | None = None
+    model: str | None = None
