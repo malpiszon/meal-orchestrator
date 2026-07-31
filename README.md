@@ -7,9 +7,9 @@ by email and Discord.
 
 ## Workflow
 
-Before processing any user, the run verifies the configured LLM model
-supports structured JSON outputs on OpenRouter, failing the whole run early
-if it doesn't.
+Before processing any user, the run verifies the configured LLM model (and
+any configured `llm.fallback_models`) support structured JSON outputs on
+OpenRouter, failing the whole run early if any of them don't.
 
 For each configured user, per run:
 
@@ -40,7 +40,15 @@ a status notification is sent instead of treating it as an error.
   stop the user's workflow without delivery. A capability check rejects
   models without structured-output support before any user is processed. An
   optional `llm.dry_run_model` is used instead of `llm.model` during
-  `--dry-run` runs, so validation runs can use a cheaper model.
+  `--dry-run` runs, so validation runs can use a cheaper model. An optional
+  `llm.fallback_models` list gives each configured model its own full retry
+  budget in order: once the primary model's retries are exhausted, the next
+  model is tried the same way, and so on, instead of failing the whole run.
+  (OpenRouter's own `models` array looked like a simpler way to do this, but
+  it doesn't fail over for the embedded-error-in-a-200-response shape rate
+  limits actually use, so the client drives the switch itself.) Fallback is
+  omitted during `--dry-run` runs so a rate-limited dry run can't escalate
+  past `dry_run_model`'s cost tier.
 - Email delivery via Resend, Discord notifications via webhooks (per-user and
   operational), both optional and independently configurable.
 - `--dry-run` mode that runs the full pipeline (including the LLM call)
@@ -81,8 +89,8 @@ prompts/               per-user prompt files referenced from users.yaml
 
 Copy the example files and edit them:
 
-- `config/app.example.yaml` — timezone, LLM model/timeout/retries, default
-  provider, delivery settings, artifact retention.
+- `config/app.example.yaml` — timezone, LLM model/timeout/retries/fallback
+  models, default provider, delivery settings, artifact retention.
 - `config/users.example.yaml` — one entry per user: provider, provider
   offering id, email, Discord ids, prompt file, and purchased meals (type +
   size).

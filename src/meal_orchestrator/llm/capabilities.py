@@ -18,9 +18,13 @@ class UnsupportedModelError(RuntimeError):
 
 
 def assert_structured_output_supported(
-    model: str, *, api_key: str | None = None, timeout_seconds: int = 30
+    model: str,
+    *,
+    fallback_models: list[str] | None = None,
+    api_key: str | None = None,
+    timeout_seconds: int = 30,
 ) -> None:
-    """Fail fast if `model` doesn't advertise structured-output support on OpenRouter.
+    """Fail fast if `model` or any `fallback_models` lack structured-output support.
 
     This only catches models that are flatly incapable; OpenRouter's routing can
     still select a provider that silently ignores response_format for a given
@@ -33,6 +37,16 @@ def assert_structured_output_supported(
         timeout_seconds=timeout_seconds,
     )
     data = json.loads(raw.decode("utf-8"))
+    for candidate in (model, *(fallback_models or [])):
+        _assert_model_supported(data, candidate)
+    logger.info(
+        "openrouter capability check passed: model=%s fallback_models=%s",
+        model,
+        fallback_models or [],
+    )
+
+
+def _assert_model_supported(data: Any, model: str) -> None:
     entry = _find_model(data, model)
     if entry is None:
         raise UnsupportedModelError(f"model not found in OpenRouter model list: {model}")
@@ -42,7 +56,6 @@ def assert_structured_output_supported(
             f"model does not support structured outputs on OpenRouter: {model} "
             f"(supported_parameters={sorted(supported)})"
         )
-    logger.info("openrouter capability check passed: model=%s", model)
 
 
 def _find_model(data: Any, model: str) -> dict[str, Any] | None:

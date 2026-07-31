@@ -18,7 +18,7 @@ from meal_orchestrator.domain.llm_output import (
     week_assessment_json_schema,
 )
 from meal_orchestrator.http import post_json
-from meal_orchestrator.retries import is_transient_http_error, with_retries
+from meal_orchestrator.retries import RetryError, is_transient_http_error, with_retries
 
 logger = logging.getLogger(__name__)
 
@@ -163,12 +163,12 @@ class OpenRouterClient:
         attempt = 0
         feedback: str | None = None
 
-        def _call() -> tuple[dict[str, Any], WeekAssessment]:
+        def _call(model: str) -> tuple[dict[str, Any], WeekAssessment]:
             nonlocal attempt
             attempt += 1
             body = json.dumps(
                 {
-                    "model": request.model,
+                    "model": model,
                     "messages": [
                         {
                             "role": "user",
@@ -176,6 +176,9 @@ class OpenRouterClient:
                         }
                     ],
                     "response_format": _RESPONSE_FORMAT,
+                    # Skip any endpoint that would silently ignore response_format
+                    # rather than risk a non-schema-conforming completion from it.
+                    "provider": {"require_parameters": True},
                 }
             ).encode("utf-8")
             try:
@@ -209,18 +212,53 @@ class OpenRouterClient:
                 if new_feedback is not None:
                     feedback = new_feedback
 
-        response, assessment = with_retries(
-            _call,
-            max_attempts=self._max_retries,
-            base_delay_seconds=_BASE_DELAY,
-            backoff_factor=_BACKOFF_FACTOR,
-            retryable=lambda exc: is_transient_http_error(exc)
-            or (isinstance(exc, OpenRouterResponseError) and exc.retryable),
-            operation_name=f"openrouter generate model={request.model}",
-            on_retry=_on_retry,
-            delay_seconds=_retry_delay_seconds,
-        )
-        return _build_result(response, assessment, attempt, request.model)
+        # OpenRouter's own `models` array is documented to fail over mid-request on
+        # error, but in practice it does not trigger for the embedded-error-in-a-200
+        # -response shape (e.g. rate_limit_exceeded) — observed keeping the same
+        # rate-limited model selected across every retry of an unchanged request. So
+        # fallback is driven here instead: each candidate model gets its own full
+        # max_retries budget (with the existing backoff/slow-clearing delays), and only
+        # once that budget is exhausted do we move to the next configured model.
+        candidates = [request.model, *request.fallback_models]
+        last_retry_error: RetryError | None = None
+        for index, model in enumerate(candidates):
+            try:
+                response, assessment = with_retries(
+                    lambda model=model: _call(model),
+                    max_attempts=self._max_retries,
+                    base_delay_seconds=_BASE_DELAY,
+                    backoff_factor=_BACKOFF_FACTOR,
+                    retryable=lambda exc: is_transient_http_error(exc)
+                    or (isinstance(exc, OpenRouterResponseError) and exc.retryable),
+                    operation_name=f"openrouter generate model={model}",
+                    on_retry=_on_retry,
+                    delay_seconds=_retry_delay_seconds,
+                )
+            except RetryError as exc:
+                last_retry_error = exc
+                if index < len(candidates) - 1:
+                    logger.warning(
+                        "openrouter generate model=%s exhausted %d attempt(s), "
+                        "falling back to model=%s",
+                        model,
+                        self._max_retries,
+                        candidates[index + 1],
+                    )
+                continue
+            return _build_result(response, assessment, attempt, model)
+        assert last_retry_error is not None  # candidates is never empty
+        if len(candidates) > 1:
+            # Naming only the last candidate here would hide that other models were
+            # tried first and failed for unrelated reasons (e.g. the primary was
+            # rate-limited while the fallback separately produced a bad completion) —
+            # callers (ops notifications, logs) only see this final message.
+            tried = ", ".join(candidates)
+            raise RetryError(
+                f"openrouter generate exhausted all {len(candidates)} candidate model(s) "
+                f"({tried}): {last_retry_error.last_exception}",
+                last_exception=last_retry_error.last_exception,
+            ) from last_retry_error
+        raise last_retry_error
 
 
 def _retry_delay_seconds(exc: Exception, attempt: int) -> float:

@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
+from typing import Protocol
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -29,6 +30,10 @@ from meal_orchestrator.workflow import UserWorkflowExecutor
 logger = logging.getLogger(__name__)
 
 
+class CapabilityCheck(Protocol):
+    def __call__(self, model: str, *, fallback_models: list[str] | None = None) -> None: ...
+
+
 @dataclass(frozen=True)
 class RunOptions:
     user_id: str | None = None
@@ -49,7 +54,7 @@ class RunOrchestrator:
         llm_client: OpenRouterClient | None = None,
         email_client: EmailClient | None = None,
         discord_client: DiscordClient | None = None,
-        capability_check: Callable[[str], None] | None = None,
+        capability_check: CapabilityCheck | None = None,
     ) -> None:
         self.app_config = app_config
         self.users = users
@@ -79,7 +84,7 @@ class RunOrchestrator:
         capability_check = self.capability_check_override or assert_structured_output_supported
         model = self._resolve_model(options)
         try:
-            capability_check(model)
+            capability_check(model, fallback_models=self.app_config.llm.fallback_models)
         except Exception as exc:
             logger.error(
                 "capability check failed: model=%s error=%s",
@@ -174,6 +179,7 @@ class RunOrchestrator:
                         user_id=user.id,
                         run_id=run_id,
                         result=result,
+                        expected_model=model,
                     )
                 else:
                     logger.info(
@@ -211,15 +217,22 @@ class RunOrchestrator:
 
 
 def _build_ops_message(
-    webhook_env: str, user_id: str, run_id: str, result: WorkflowResult
+    webhook_env: str, user_id: str, run_id: str, result: WorkflowResult, expected_model: str
 ) -> DiscordMessage:
-    retry_note = _retry_note(result.retry_count)
     if result.status == WorkflowStatus.COMPLETED:
+        run_note = _run_note(run_id, result.retry_count)
+        description = f"Workflow completed for user {user_id} {run_note}."
+        color = COLOR_SUCCESS
+        if result.model and result.model != expected_model:
+            description += (
+                f" Served by fallback model {result.model} (configured primary: {expected_model})."
+            )
+            color = COLOR_WARNING
         return DiscordMessage(
             webhook_env=webhook_env,
             title="Workflow completed",
-            description=f"Workflow completed for user {user_id} (run {run_id}).{retry_note}",
-            color=COLOR_SUCCESS,
+            description=description,
+            color=color,
         )
     if result.status == WorkflowStatus.MENU_UNAVAILABLE:
         detail = result.detail or "unknown reason"
@@ -235,16 +248,18 @@ def _build_ops_message(
         title="Workflow failed",
         description=(
             f"Workflow failed for user {user_id} (run {run_id}) at step {failed_step}: "
-            f"{result.detail or 'unknown error'}{retry_note}"
+            # The underlying error message already states the attempt count
+            # (e.g. "failed after 3 attempt(s)"), so no separate retry note here.
+            f"{result.detail or 'unknown error'}"
         ),
         color=COLOR_ERROR,
     )
 
 
-def _retry_note(retry_count: int | None) -> str:
+def _run_note(run_id: str, retry_count: int | None) -> str:
     if not retry_count:
-        return ""
-    return f" ({retry_count} retr{'y' if retry_count == 1 else 'ies'})"
+        return f"(run {run_id})"
+    return f"(run {run_id}, {retry_count} retr{'y' if retry_count == 1 else 'ies'})"
 
 
 def _notify_capability_check_failed(
@@ -285,9 +300,12 @@ def _send_operational_notification(
     user_id: str,
     run_id: str,
     result: WorkflowResult,
+    expected_model: str,
 ) -> None:
     try:
-        discord_client.notify(_build_ops_message(webhook_env, user_id, run_id, result))
+        discord_client.notify(
+            _build_ops_message(webhook_env, user_id, run_id, result, expected_model)
+        )
     except Exception:
         logger.warning(
             "operational discord notification failed",

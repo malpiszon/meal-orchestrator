@@ -19,11 +19,14 @@ from meal_orchestrator.retries import RetryError
 from tests.unit.helpers import canonical_menu, week_assessment
 
 
-def _make_request(model: str = "openai/gpt-4o-mini") -> LlmRequest:
+def _make_request(
+    model: str = "openai/gpt-4o-mini", fallback_models: list[str] | None = None
+) -> LlmRequest:
     return LlmRequest(
         model=model,
         payload=PromptPayload(user_prompt="Choose the best meals.", menu=canonical_menu()),
         timeout_seconds=30,
+        fallback_models=fallback_models or [],
     )
 
 
@@ -236,6 +239,193 @@ class TestOpenRouterClientGenerate:
             client.generate(_make_request(model="anthropic/claude-haiku-4-5"))
 
         assert captured["body"]["model"] == "anthropic/claude-haiku-4-5"
+
+    def test_sends_only_model_when_no_fallback_models_configured(self) -> None:
+        captured = {}
+
+        def side_effect(req, timeout=None):
+            captured["body"] = json.loads(req.data.decode("utf-8"))
+            return _mock_urlopen(_mock_response(_assessment_json()))
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            client = OpenRouterClient(api_key="test-key")
+            client.generate(_make_request(model="openai/gpt-4o-mini"))
+
+        assert captured["body"]["model"] == "openai/gpt-4o-mini"
+        assert "models" not in captured["body"]
+
+    def test_sends_only_primary_model_first_even_with_fallback_configured(self) -> None:
+        # OpenRouter's own `models` array does not reliably fail over for the
+        # embedded-error-in-a-200 shape (observed keeping the same rate-limited model
+        # selected across every retry), so fallback is driven client-side: each request
+        # names exactly one candidate model, never an array.
+        captured = {}
+
+        def side_effect(req, timeout=None):
+            captured["body"] = json.loads(req.data.decode("utf-8"))
+            return _mock_urlopen(_mock_response(_assessment_json()))
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            client = OpenRouterClient(api_key="test-key")
+            client.generate(
+                _make_request(
+                    model="openai/gpt-4o-mini",
+                    fallback_models=["openai/gpt-4.1-mini", "anthropic/claude-haiku-4-5"],
+                )
+            )
+
+        assert captured["body"]["model"] == "openai/gpt-4o-mini"
+        assert "models" not in captured["body"]
+
+    def test_falls_back_to_next_model_after_exhausting_primary_retries(self) -> None:
+        bodies = []
+
+        def side_effect(req, timeout=None):
+            bodies.append(json.loads(req.data.decode("utf-8")))
+            if len(bodies) <= 2:
+                return _mock_urlopen(_mock_error_response("rate_limit_exceeded"))
+            return _mock_urlopen(
+                _mock_response(_assessment_json(), model="openai/gpt-4.1-mini")
+            )
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            with patch("time.sleep"):
+                client = OpenRouterClient(api_key="test-key", max_retries=2)
+                result = client.generate(
+                    _make_request(
+                        model="openai/gpt-4o-mini", fallback_models=["openai/gpt-4.1-mini"]
+                    )
+                )
+
+        assert len(bodies) == 3
+        assert [body["model"] for body in bodies] == [
+            "openai/gpt-4o-mini",
+            "openai/gpt-4o-mini",
+            "openai/gpt-4.1-mini",
+        ]
+        assert result.model == "openai/gpt-4.1-mini"
+        assert result.structured == week_assessment(canonical_menu())
+
+    def test_does_not_fall_back_on_permanent_primary_error(self) -> None:
+        call_count = 0
+
+        def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return _mock_urlopen(_mock_error_response("authentication"))
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            client = OpenRouterClient(api_key="test-key", max_retries=2)
+            with pytest.raises(OpenRouterResponseError):
+                client.generate(
+                    _make_request(
+                        model="openai/gpt-4o-mini", fallback_models=["openai/gpt-4.1-mini"]
+                    )
+                )
+
+        assert call_count == 1
+
+    def test_raises_retry_error_when_every_candidate_model_is_exhausted(self) -> None:
+        call_count = 0
+
+        def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return _mock_urlopen(_mock_error_response("rate_limit_exceeded"))
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            with patch("time.sleep"):
+                client = OpenRouterClient(api_key="test-key", max_retries=2)
+                with pytest.raises(RetryError):
+                    client.generate(
+                        _make_request(
+                            model="openai/gpt-4o-mini", fallback_models=["openai/gpt-4.1-mini"]
+                        )
+                    )
+
+        assert call_count == 4
+
+    def test_final_error_names_every_candidate_model_tried(self) -> None:
+        # Naming only the last model tried would hide that the primary was attempted
+        # (and failed for a possibly unrelated reason) before falling back.
+        call_count = 0
+
+        def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return _mock_urlopen(_mock_error_response("rate_limit_exceeded"))
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            with patch("time.sleep"):
+                client = OpenRouterClient(api_key="test-key", max_retries=2)
+                with pytest.raises(RetryError) as exc_info:
+                    client.generate(
+                        _make_request(
+                            model="openai/gpt-4o-mini",
+                            fallback_models=["openai/gpt-4.1-mini", "anthropic/claude-haiku-4-5"],
+                        )
+                    )
+
+        message = str(exc_info.value)
+        assert "3 candidate model(s)" in message
+        assert "openai/gpt-4o-mini" in message
+        assert "openai/gpt-4.1-mini" in message
+        assert "anthropic/claude-haiku-4-5" in message
+        assert isinstance(exc_info.value.last_exception, OpenRouterResponseError)
+
+    def test_final_error_message_unchanged_with_no_fallback_configured(self) -> None:
+        # Preserve the exact single-model message shape when no fallback is
+        # configured — no "exhausted all N candidate model(s)" wrapping.
+        with patch(
+            "urllib.request.urlopen", return_value=_mock_urlopen(_mock_partial_response("error"))
+        ):
+            with patch("time.sleep"):
+                client = OpenRouterClient(api_key="test-key", max_retries=2)
+                with pytest.raises(RetryError) as exc_info:
+                    client.generate(_make_request())
+
+        assert "candidate model(s)" not in str(exc_info.value)
+
+    def test_attempt_counter_keeps_incrementing_across_fallback_switch(self) -> None:
+        bodies = []
+
+        def side_effect(req, timeout=None):
+            bodies.append(json.loads(req.data.decode("utf-8")))
+            if len(bodies) <= 2:
+                return _mock_urlopen(_mock_error_response("rate_limit_exceeded"))
+            return _mock_urlopen(
+                _mock_response(_assessment_json(), model="openai/gpt-4.1-mini")
+            )
+
+        attempts: list[int] = []
+
+        def on_attempt(attempt, feedback, response, outcome):
+            attempts.append(attempt)
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            with patch("time.sleep"):
+                client = OpenRouterClient(api_key="test-key", max_retries=2)
+                client.generate(
+                    _make_request(
+                        model="openai/gpt-4o-mini", fallback_models=["openai/gpt-4.1-mini"]
+                    ),
+                    on_attempt=on_attempt,
+                )
+
+        assert attempts == [1, 2, 3]
+
+    def test_sends_require_parameters_provider_preference(self) -> None:
+        captured = {}
+
+        def side_effect(req, timeout=None):
+            captured["body"] = json.loads(req.data.decode("utf-8"))
+            return _mock_urlopen(_mock_response(_assessment_json()))
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            client = OpenRouterClient(api_key="test-key")
+            client.generate(_make_request())
+
+        assert captured["body"]["provider"] == {"require_parameters": True}
 
     def test_sends_strict_json_schema_response_format(self) -> None:
         captured = {}

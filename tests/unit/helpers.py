@@ -21,7 +21,7 @@ from meal_orchestrator.domain import (
 )
 
 
-def app_config() -> AppConfig:
+def app_config(*, fallback_models: list[str] | None = None) -> AppConfig:
     return AppConfig(
         runtime=RuntimeConfig(timezone="Europe/Warsaw"),
         llm=LlmConfig(
@@ -30,6 +30,7 @@ def app_config() -> AppConfig:
             dry_run_model="test-dry-run-model",
             timeout_seconds=30,
             max_retries=1,
+            fallback_models=fallback_models or [],
         ),
         default_provider="example_provider",
         delivery=DeliveryConfig(

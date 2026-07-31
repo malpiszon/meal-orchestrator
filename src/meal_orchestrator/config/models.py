@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from meal_orchestrator.domain import PurchasedMeal
@@ -18,6 +18,7 @@ class LlmConfig:
     timeout_seconds: int
     max_retries: int
     dry_run_model: str | None = None
+    fallback_models: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

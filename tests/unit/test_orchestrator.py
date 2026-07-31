@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import date
 
+from meal_orchestrator.delivery.discord import COLOR_WARNING
 from meal_orchestrator.domain import LlmResult, ProviderMenuRequest, ProviderResult, WorkflowStatus
 from meal_orchestrator.llm import EmptyLlmResponseError, LlmFailureDetails
 from meal_orchestrator.orchestrator import RunOptions, RunOrchestrator
@@ -36,13 +37,14 @@ class FailingProvider:
 
 
 class FakeLlmClient:
-    def __init__(self, *, attempt: int = 1) -> None:
+    def __init__(self, *, attempt: int = 1, served_model: str | None = None) -> None:
         self.attempt = attempt
+        self.served_model = served_model
 
     def generate(self, request, **_kwargs):
         return LlmResult(
             structured=week_assessment(request.payload.menu),
-            model=request.model,
+            model=self.served_model or request.model,
             response_metadata={"attempt": self.attempt},
         )
 
@@ -65,7 +67,7 @@ class FailingLlmClient:
         )
 
 
-def _no_capability_check(model: str) -> None:
+def _no_capability_check(model: str, **_kwargs) -> None:
     pass
 
 
@@ -146,9 +148,40 @@ def test_operational_notification_includes_retry_count(tmp_path, monkeypatch) ->
 
     assert result[0].status == WorkflowStatus.COMPLETED
     ops_msg = discord.messages[-1]
-    assert "(2 retries)" in ops_msg.description
+    # Run id and retry count share a single parenthetical, e.g. "(run <id>, 2 retries)" —
+    # not two separate ones back to back like "(run <id>). (2 retries)".
+    assert ", 2 retries)" in ops_msg.description
+    assert "). (2 retries)" not in ops_msg.description
     user_msg = next(m for m in discord.messages if m.webhook_env != "DISCORD_OPS_WEBHOOK_URL")
     assert "retr" not in user_msg.description
+
+
+def test_operational_notification_flags_fallback_model_on_completion(
+    tmp_path, monkeypatch
+) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    monkeypatch.setenv("DISCORD_OPS_WEBHOOK_URL", "https://example.com/ops")
+    monkeypatch.setenv("DISCORD_USER_WEBHOOK_URL", "https://example.com/user")
+    discord = FakeDiscordClient()
+
+    orchestrator = RunOrchestrator(
+        app_config=app_config(),
+        users=[user_config(prompt_file.relative_to(tmp_path))],
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=FakeLlmClient(served_model="fallback-model"),
+        email_client=FakeEmailClient(),
+        discord_client=discord,
+        capability_check=_no_capability_check,
+    )
+
+    orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    ops_msg = discord.messages[-1]
+    assert "fallback model fallback-model" in ops_msg.description
+    assert "configured primary: test-model" in ops_msg.description
+    assert ops_msg.color == COLOR_WARNING
 
 
 def test_orchestrator_sends_operational_notification_on_failure(tmp_path, monkeypatch) -> None:
@@ -177,9 +210,15 @@ def test_orchestrator_sends_operational_notification_on_failure(tmp_path, monkey
     assert "provider exploded" in discord.messages[0].description
 
 
-def test_operational_notification_includes_retry_count_on_llm_failure(
+def test_operational_notification_omits_redundant_retry_note_on_llm_failure(
     tmp_path, monkeypatch
 ) -> None:
+    """The underlying error text already states the attempt count.
+
+    ("openrouter failed after 3 attempt(s)"), so the failure ops message must not
+    also append a separately-worded "(N retries)" note that states the same thing
+    with a different (off-by-one) number and reads like a stray trailing fragment.
+    """
     prompt_file = tmp_path / "prompt.md"
     prompt_file.write_text("Choose meals.", encoding="utf-8")
     monkeypatch.setenv("DISCORD_OPS_WEBHOOK_URL", "https://example.com/ops")
@@ -200,9 +239,11 @@ def test_operational_notification_includes_retry_count_on_llm_failure(
     result = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
 
     assert result[0].status == WorkflowStatus.FAILED
+    assert result[0].retry_count == 2
     ops_msg = discord.messages[0]
     assert ops_msg.webhook_env == "DISCORD_OPS_WEBHOOK_URL"
-    assert "(2 retries)" in ops_msg.description
+    assert "failed after 3 attempt(s)" in ops_msg.description
+    assert "retries)" not in ops_msg.description
 
 
 def test_orchestrator_skips_operational_notification_when_env_var_not_set(
@@ -292,6 +333,9 @@ def test_orchestrator_runs_capability_check_with_resolved_model(tmp_path) -> Non
     prompt_file.write_text("Choose meals.", encoding="utf-8")
     captured_models: list[str] = []
 
+    def _capturing_capability_check(model: str, **_kwargs) -> None:
+        captured_models.append(model)
+
     orchestrator = RunOrchestrator(
         app_config=app_config(),
         users=[user_config(prompt_file.relative_to(tmp_path))],
@@ -300,7 +344,7 @@ def test_orchestrator_runs_capability_check_with_resolved_model(tmp_path) -> Non
         llm_client=FakeLlmClient(),
         email_client=FakeEmailClient(),
         discord_client=FakeDiscordClient(),
-        capability_check=captured_models.append,
+        capability_check=_capturing_capability_check,
     )
 
     orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
@@ -312,6 +356,30 @@ def test_orchestrator_runs_capability_check_with_resolved_model(tmp_path) -> Non
     assert captured_models == ["test-model", "test-dry-run-model", "override-model"]
 
 
+def test_orchestrator_runs_capability_check_with_configured_fallback_models(tmp_path) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    captured_fallback_models: list[list[str]] = []
+
+    def _capturing_capability_check(model: str, *, fallback_models=None, **_kwargs) -> None:
+        captured_fallback_models.append(fallback_models)
+
+    orchestrator = RunOrchestrator(
+        app_config=app_config(fallback_models=["openai/gpt-4.1-mini"]),
+        users=[user_config(prompt_file.relative_to(tmp_path))],
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=FakeLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=FakeDiscordClient(),
+        capability_check=_capturing_capability_check,
+    )
+
+    orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert captured_fallback_models == [["openai/gpt-4.1-mini"]]
+
+
 def test_orchestrator_fails_all_users_gracefully_when_capability_check_fails(tmp_path) -> None:
     """A capability-check failure must degrade like every other failure mode.
 
@@ -321,7 +389,7 @@ def test_orchestrator_fails_all_users_gracefully_when_capability_check_fails(tmp
     prompt_file = tmp_path / "prompt.md"
     prompt_file.write_text("Choose meals.", encoding="utf-8")
 
-    def _failing_capability_check(model: str) -> None:
+    def _failing_capability_check(model: str, **_kwargs) -> None:
         raise RuntimeError("model does not support structured outputs")
 
     other_user_prompt = tmp_path / "other_prompt.md"
@@ -361,7 +429,7 @@ def test_capability_check_failure_sends_ops_notification(tmp_path, monkeypatch) 
     monkeypatch.setenv("DISCORD_OPS_WEBHOOK_URL", "https://example.com/ops")
     discord = FakeDiscordClient()
 
-    def _failing_capability_check(model: str) -> None:
+    def _failing_capability_check(model: str, **_kwargs) -> None:
         raise RuntimeError("model does not support structured outputs")
 
     orchestrator = RunOrchestrator(
@@ -390,7 +458,7 @@ def test_capability_check_failure_suppresses_ops_notification_on_dry_run(
     monkeypatch.setenv("DISCORD_OPS_WEBHOOK_URL", "https://example.com/ops")
     discord = FakeDiscordClient()
 
-    def _failing_capability_check(model: str) -> None:
+    def _failing_capability_check(model: str, **_kwargs) -> None:
         raise RuntimeError("model does not support structured outputs")
 
     orchestrator = RunOrchestrator(

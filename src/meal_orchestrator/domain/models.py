@@ -124,6 +124,7 @@ class LlmRequest:
     model: str
     payload: PromptPayload
     timeout_seconds: int
+    fallback_models: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -164,3 +165,4 @@ class WorkflowResult:
     detail: str | None = None
     failed_step: str | None = None
     retry_count: int | None = None
+    model: str | None = None
