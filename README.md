@@ -41,12 +41,14 @@ a status notification is sent instead of treating it as an error.
   models without structured-output support before any user is processed. An
   optional `llm.dry_run_model` is used instead of `llm.model` during
   `--dry-run` runs, so validation runs can use a cheaper model. An optional
-  `llm.fallback_models` list is passed to OpenRouter's native model-fallback
-  routing, so a persistent failure on the primary model (rate limits,
-  downtime, moderation, context length) automatically retries against the
-  next model instead of exhausting the run; it's omitted during `--dry-run`
-  runs so a rate-limited dry run can't escalate past `dry_run_model`'s cost
-  tier.
+  `llm.fallback_models` list gives each configured model its own full retry
+  budget in order: once the primary model's retries are exhausted, the next
+  model is tried the same way, and so on, instead of failing the whole run.
+  (OpenRouter's own `models` array looked like a simpler way to do this, but
+  it doesn't fail over for the embedded-error-in-a-200-response shape rate
+  limits actually use, so the client drives the switch itself.) Fallback is
+  omitted during `--dry-run` runs so a rate-limited dry run can't escalate
+  past `dry_run_model`'s cost tier.
 - Email delivery via Resend, Discord notifications via webhooks (per-user and
   operational), both optional and independently configurable.
 - `--dry-run` mode that runs the full pipeline (including the LLM call)
