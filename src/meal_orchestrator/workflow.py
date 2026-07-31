@@ -251,8 +251,8 @@ class UserWorkflowExecutor:
                         f"{SUBJECT_EMOJI} Meal plan for {run_context.week_start.isoformat()}"
                         f" – {run_context.week_end.isoformat()}"
                     ),
-                    body=render_plain_text(llm_result.structured, menu),
-                    html_body=render_html(llm_result.structured, menu),
+                    body=render_plain_text(llm_result.structured, menu, run_context.run_id),
+                    html_body=render_html(llm_result.structured, menu, run_context.run_id),
                 ),
                 idempotency_key=f"{run_context.run_id}:{user.id}:email",
             )

@@ -39,10 +39,11 @@ border-radius:10px;padding:2px 8px}}
 .variant-name{{display:inline-block;padding-left:8px;font-size:14px;font-weight:bold;
 color:#1f2933}}
 .justification{{margin-top:6px;font-size:13px;color:#5a6b7a}}
+.footer{{padding:12px 20px;font-size:11px;color:#9aa5b1;text-align:center}}
 """
 
 
-def render_html(assessment: WeekAssessment, menu: CanonicalMenu) -> str:
+def render_html(assessment: WeekAssessment, menu: CanonicalMenu, run_id: str) -> str:
     """Render a WeekAssessment as a Gmail-safe HTML email.
 
     Div-based layout with a <style> block of classes (see `_STYLE` for why not
@@ -72,6 +73,7 @@ def render_html(assessment: WeekAssessment, menu: CanonicalMenu) -> str:
 <body>
 <div class="card">
 {body}
+<div class="footer">Run ID: {escape(run_id)}</div>
 </div>
 </body>
 </html>

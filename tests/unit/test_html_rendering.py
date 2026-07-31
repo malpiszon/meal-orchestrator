@@ -70,7 +70,7 @@ def test_sorts_variants_by_score_descending() -> None:
     menu = _menu_with_variants("Low", "High", "Mid")
     assessment = _assessment(menu, [4, 9, 6])
 
-    rendered = render_html(assessment, menu)
+    rendered = render_html(assessment, menu, "test-run-id")
 
     assert rendered.index("High") < rendered.index("Mid") < rendered.index("Low")
 
@@ -79,7 +79,7 @@ def test_marks_all_variants_tied_for_top_score_with_star() -> None:
     menu = _menu_with_variants("A", "B", "C")
     assessment = _assessment(menu, [8, 8, 5])
 
-    rendered = render_html(assessment, menu)
+    rendered = render_html(assessment, menu, "test-run-id")
 
     assert rendered.count("⭐") == 2
 
@@ -88,7 +88,7 @@ def test_includes_day_and_meal_headers() -> None:
     menu = _menu_with_variants("Only")
     assessment = _assessment(menu, [8])
 
-    rendered = render_html(assessment, menu)
+    rendered = render_html(assessment, menu, "test-run-id")
 
     emoji, label = meal_label("breakfast")
     assert weekday_name(date(2026, 6, 1)) in rendered
@@ -99,7 +99,7 @@ def test_renders_justification_icon_and_text() -> None:
     menu = _menu_with_variants("Only")
     assessment = _assessment(menu, [8])
 
-    rendered = render_html(assessment, menu)
+    rendered = render_html(assessment, menu, "test-run-id")
 
     assert "💪" in rendered
     assert "Reason." in rendered
@@ -128,7 +128,7 @@ def test_uses_canonical_menu_name_not_model_echoed_name() -> None:
         ]
     )
 
-    rendered = render_html(assessment, menu)
+    rendered = render_html(assessment, menu, "test-run-id")
 
     assert "Canonical Name" in rendered
     assert "Paraphrased Name" not in rendered
@@ -159,7 +159,7 @@ def test_escapes_html_special_characters_in_llm_text() -> None:
         ]
     )
 
-    rendered = render_html(assessment, menu)
+    rendered = render_html(assessment, menu, "test-run-id")
 
     assert "<script>alert(1)</script>" not in rendered
     assert "&lt;script&gt;" in rendered
@@ -170,7 +170,7 @@ def test_produces_well_formed_html_document() -> None:
     menu = _menu_with_variants("Only")
     assessment = _assessment(menu, [8])
 
-    rendered = render_html(assessment, menu)
+    rendered = render_html(assessment, menu, "test-run-id")
 
     assert rendered.startswith("<!doctype html>")
     assert "<html" in rendered
@@ -231,6 +231,6 @@ def test_full_week_stays_under_gmail_clip_threshold() -> None:
     )
     assessment = WeekAssessment(days=assessed_days)
 
-    rendered = render_html(assessment, menu)
+    rendered = render_html(assessment, menu, "test-run-id")
 
     assert len(rendered.encode("utf-8")) < _GMAIL_CLIP_THRESHOLD_BYTES

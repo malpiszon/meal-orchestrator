@@ -65,7 +65,7 @@ def test_sorts_variants_by_score_descending() -> None:
     menu = _menu_with_variants("Low", "High", "Mid")
     assessment = _assessment(menu, [4, 9, 6])
 
-    rendered = render_plain_text(assessment, menu)
+    rendered = render_plain_text(assessment, menu, "test-run-id")
 
     assert rendered.index("High") < rendered.index("Mid") < rendered.index("Low")
 
@@ -74,7 +74,7 @@ def test_marks_all_variants_tied_for_top_score_with_star() -> None:
     menu = _menu_with_variants("A", "B", "C")
     assessment = _assessment(menu, [8, 8, 5])
 
-    rendered = render_plain_text(assessment, menu)
+    rendered = render_plain_text(assessment, menu, "test-run-id")
 
     assert rendered.count("⭐") == 2
     a_line = next(line for line in rendered.splitlines() if line.endswith("A"))
@@ -89,7 +89,7 @@ def test_includes_day_and_meal_headers() -> None:
     menu = _menu_with_variants("Only")
     assessment = _assessment(menu, [8])
 
-    rendered = render_plain_text(assessment, menu)
+    rendered = render_plain_text(assessment, menu, "test-run-id")
 
     emoji, label = meal_label("breakfast")
     assert f"{weekday_name(date(2026, 6, 1))}" in rendered
@@ -100,7 +100,7 @@ def test_renders_bullets_with_icon_and_text() -> None:
     menu = _menu_with_variants("Only")
     assessment = _assessment(menu, [8])
 
-    rendered = render_plain_text(assessment, menu)
+    rendered = render_plain_text(assessment, menu, "test-run-id")
 
     assert "• 💪 Reason." in rendered
 
@@ -128,7 +128,7 @@ def test_uses_canonical_menu_name_not_model_echoed_name() -> None:
         ]
     )
 
-    rendered = render_plain_text(assessment, menu)
+    rendered = render_plain_text(assessment, menu, "test-run-id")
 
     assert "Canonical Name" in rendered
     assert "Paraphrased Name" not in rendered
