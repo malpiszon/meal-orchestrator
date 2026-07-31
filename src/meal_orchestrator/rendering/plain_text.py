@@ -5,7 +5,7 @@ from meal_orchestrator.rendering.join import iter_days, iter_meals, sorted_varia
 from meal_orchestrator.rendering.labels import DAY_EMOJI, meal_label, weekday_name
 
 
-def render_plain_text(assessment: WeekAssessment, menu: CanonicalMenu) -> str:
+def render_plain_text(assessment: WeekAssessment, menu: CanonicalMenu, run_id: str) -> str:
     """Render a WeekAssessment as plain text (channel-agnostic — usable for email today)."""
     lines: list[str] = []
     for canonical_day, day in iter_days(assessment, menu):
@@ -16,6 +16,7 @@ def render_plain_text(assessment: WeekAssessment, menu: CanonicalMenu) -> str:
             lines.append(f"{emoji} {label}")
             lines.append("")
             lines.extend(_render_meal(meal, canonical_meal))
+    lines.append(f"Run ID: {run_id}")
     return "\n".join(lines).rstrip("\n") + "\n"
 
 

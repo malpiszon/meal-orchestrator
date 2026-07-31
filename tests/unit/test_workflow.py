@@ -127,10 +127,10 @@ def test_non_dry_run_calls_llm_and_email(tmp_path) -> None:
     assert result.status == WorkflowStatus.COMPLETED
     assert len(llm.requests) == 1
     assert email.messages[0].body == render_plain_text(
-        week_assessment(canonical_menu()), canonical_menu()
+        week_assessment(canonical_menu()), canonical_menu(), "run-1"
     )
     assert email.messages[0].html_body == render_html(
-        week_assessment(canonical_menu()), canonical_menu()
+        week_assessment(canonical_menu()), canonical_menu(), "run-1"
     )
     assert email.messages[0].subject == f"{SUBJECT_EMOJI} Meal plan for 2026-06-01 – 2026-06-05"
     assert email.idempotency_keys == ["run-1:alan:email"]
