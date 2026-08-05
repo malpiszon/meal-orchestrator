@@ -91,6 +91,85 @@ class FailingLlmClient:
         )
 
 
+def _rejected_response(model: str, *, prompt_tokens: int, completion_tokens: int, cost: float):
+    return (
+        {
+            "model": model,
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "cost": cost,
+            },
+        },
+        {"accepted": False, "reason": "incomplete_assessment", "model": model},
+    )
+
+
+class FallbackLlmClient:
+    """Reports several rejected attempts across candidate models before accepting."""
+
+    def generate(self, request, *, on_attempt=None):
+        if on_attempt is not None:
+            response, outcome = _rejected_response(
+                "openai/gpt-5-mini", prompt_tokens=100, completion_tokens=50, cost=0.01
+            )
+            on_attempt(1, None, response, outcome)
+            response, outcome = _rejected_response(
+                "openai/gpt-5-mini", prompt_tokens=110, completion_tokens=60, cost=0.012
+            )
+            on_attempt(2, "retry feedback", response, outcome)
+            on_attempt(
+                3,
+                None,
+                None,
+                {
+                    "accepted": False,
+                    "reason": "network_error",
+                    "error": "timeout",
+                    "model": "openai/gpt-5-mini",
+                },
+            )
+            on_attempt(
+                4,
+                None,
+                {
+                    "model": "google/gemini-3.1-flash-lite",
+                    "usage": {"prompt_tokens": 90, "completion_tokens": 40, "cost": 0.008},
+                },
+                {"accepted": True},
+            )
+        return LlmResult(
+            structured=week_assessment(request.payload.menu),
+            model="google/gemini-3.1-flash-lite",
+            response_metadata={"generation_id": "gen-example", "attempt": 4},
+        )
+
+
+class FailingAfterAttemptsLlmClient:
+    """Reports a couple of failed attempts before exhausting all candidates."""
+
+    def generate(self, request, *, on_attempt=None):
+        if on_attempt is not None:
+            response, outcome = _rejected_response(
+                "openai/gpt-5-mini", prompt_tokens=100, completion_tokens=50, cost=0.01
+            )
+            on_attempt(1, None, response, outcome)
+            response, outcome = _rejected_response(
+                "openai/gpt-5-mini", prompt_tokens=105, completion_tokens=55, cost=0.011
+            )
+            on_attempt(2, None, response, outcome)
+        raise RetryError(
+            "openrouter failed after 2 attempt(s)",
+            EmptyLlmResponseError(
+                LlmFailureDetails(
+                    reason="incomplete_assessment",
+                    attempt=2,
+                    response={"id": "gen-example", "model": "openai/gpt-5-mini"},
+                )
+            ),
+        )
+
+
 def test_dry_run_calls_llm_with_dry_run_model_but_skips_delivery(tmp_path) -> None:
     prompt_file = tmp_path / "prompt.md"
     prompt_file.write_text("Choose meals.", encoding="utf-8")
@@ -320,6 +399,13 @@ def test_artifacts_written_on_successful_run(tmp_path: Path) -> None:
     assert metadata["user_id"] == "alan"
     assert metadata["app_version"] == __version__
     assert metadata["llm_response"] == {"generation_id": "gen-example", "attempt": 1}
+    assert metadata["llm_attempts_summary"] == {
+        "total_attempts": 1,
+        "models_tried": [],
+        "total_cost": 0.0,
+        "total_prompt_tokens": 0,
+        "total_completion_tokens": 0,
+    }
 
 
 def test_llm_artifacts_saved_on_dry_run(tmp_path: Path) -> None:
@@ -340,6 +426,63 @@ def test_llm_artifacts_saved_on_dry_run(tmp_path: Path) -> None:
     assert (run_dir / "llm_response.json").exists()
     metadata = json.loads((run_dir / "metadata.json").read_text())
     assert metadata["status"] == "completed"
+
+
+def test_llm_attempts_summary_aggregates_fallback_attempts(tmp_path: Path) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    artifacts_dir = tmp_path / "artifacts"
+    store = ArtifactStore(
+        ArtifactConfig(path=artifacts_dir, retention_days=14, max_runs_per_user=10)
+    )
+
+    executor = _executor(
+        tmp_path,
+        FakeProvider(),
+        FallbackLlmClient(),
+        FakeEmailClient(),
+        FakeDiscordClient(),
+        store,
+    )
+    executor.execute(user_config(prompt_file.relative_to(tmp_path)), _context(dry_run=False))
+
+    metadata = json.loads((artifacts_dir / "alan" / "run-1" / "metadata.json").read_text())
+    summary = metadata["llm_attempts_summary"]
+    assert summary["total_attempts"] == 4
+    assert summary["models_tried"] == ["openai/gpt-5-mini", "google/gemini-3.1-flash-lite"]
+    assert summary["total_cost"] == 0.03
+    assert summary["total_prompt_tokens"] == 300
+    assert summary["total_completion_tokens"] == 150
+
+
+def test_llm_attempts_summary_present_when_all_candidates_exhausted(tmp_path: Path) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    artifacts_dir = tmp_path / "artifacts"
+    store = ArtifactStore(
+        ArtifactConfig(path=artifacts_dir, retention_days=14, max_runs_per_user=10)
+    )
+
+    executor = _executor(
+        tmp_path,
+        FakeProvider(),
+        FailingAfterAttemptsLlmClient(),
+        FakeEmailClient(),
+        FakeDiscordClient(),
+        store,
+    )
+    result = executor.execute(
+        user_config(prompt_file.relative_to(tmp_path)), _context(dry_run=False)
+    )
+
+    assert result.status == WorkflowStatus.FAILED
+    metadata = json.loads((artifacts_dir / "alan" / "run-1" / "metadata.json").read_text())
+    summary = metadata["llm_attempts_summary"]
+    assert summary["total_attempts"] == 2
+    assert summary["models_tried"] == ["openai/gpt-5-mini"]
+    assert round(summary["total_cost"], 3) == 0.021
+    assert summary["total_prompt_tokens"] == 205
+    assert summary["total_completion_tokens"] == 105
 
 
 def test_metadata_written_on_failed_run(tmp_path: Path) -> None:

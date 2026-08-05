@@ -52,6 +52,7 @@ class _WorkflowState:
     failed_step: str = "provider"
     llm_failure: LlmFailureDetails | None = None
     llm_response: dict | None = None
+    llm_attempts_summary: dict | None = None
 
 
 class UserWorkflowExecutor:
@@ -93,7 +94,7 @@ class UserWorkflowExecutor:
             artifacts.save_llm_request(llm_request)
 
             state.failed_step = "llm"
-            llm_result = self._generate_plan(llm_request, artifacts, log_context)
+            llm_result = self._generate_plan(llm_request, artifacts, state, log_context)
             state.model = llm_result.model
             state.token_usage = llm_result.token_usage
             state.llm_response = llm_result.response_metadata
@@ -216,8 +217,14 @@ class UserWorkflowExecutor:
         )
 
     def _generate_plan(
-        self, request: LlmRequest, artifacts: RunArtifacts, log_context: dict
+        self,
+        request: LlmRequest,
+        artifacts: RunArtifacts,
+        state: _WorkflowState,
+        log_context: dict,
     ) -> LlmResult:
+        state.llm_attempts_summary = _new_attempts_summary()
+
         def _on_attempt(
             attempt: int, feedback: str | None, response: object, outcome: dict
         ) -> None:
@@ -225,6 +232,7 @@ class UserWorkflowExecutor:
                 attempt,
                 {"attempt": attempt, "feedback_sent": feedback, "response": response, **outcome},
             )
+            _accumulate_attempt_summary(state.llm_attempts_summary, response, outcome)
 
         result = self.llm_client.generate(request, on_attempt=_on_attempt)
         artifacts.save_llm_response(result)
@@ -349,6 +357,8 @@ class UserWorkflowExecutor:
             metadata["failed_step"] = state.failed_step
         if state.llm_response is not None:
             metadata["llm_response"] = state.llm_response
+        if state.llm_attempts_summary is not None:
+            metadata["llm_attempts_summary"] = state.llm_attempts_summary
         if state.llm_failure is not None:
             metadata["llm_failure"] = state.llm_failure.to_metadata()
         artifacts.save_metadata(metadata)
@@ -366,6 +376,36 @@ def _discord_disabled_reason(run_context: RunContext, user: UserConfig) -> str |
     if not os.environ.get(user.discord_webhook_env):
         return "env var not set"
     return None
+
+
+def _new_attempts_summary() -> dict:
+    return {
+        "total_attempts": 0,
+        "models_tried": [],
+        "total_cost": 0.0,
+        "total_prompt_tokens": 0,
+        "total_completion_tokens": 0,
+    }
+
+
+def _accumulate_attempt_summary(summary: dict, response: object, outcome: dict) -> None:
+    summary["total_attempts"] += 1
+    model = response.get("model") if isinstance(response, dict) else None
+    if model is None:
+        model = outcome.get("model")
+    if model and model not in summary["models_tried"]:
+        summary["models_tried"].append(model)
+    usage = response.get("usage") if isinstance(response, dict) else None
+    if isinstance(usage, dict):
+        cost = usage.get("cost")
+        if isinstance(cost, (int, float)):
+            summary["total_cost"] = round(summary["total_cost"] + cost, 8)
+        prompt_tokens = usage.get("prompt_tokens")
+        if isinstance(prompt_tokens, int):
+            summary["total_prompt_tokens"] += prompt_tokens
+        completion_tokens = usage.get("completion_tokens")
+        if isinstance(completion_tokens, int):
+            summary["total_completion_tokens"] += completion_tokens
 
 
 def _json_size(menu) -> int:
