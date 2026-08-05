@@ -236,6 +236,14 @@ class OpenRouterClient:
                 )
             except RetryError as exc:
                 last_retry_error = exc
+                # `with_retries` doesn't call `on_retry` for the final attempt of a
+                # model's own budget (it's about to raise, not retry) — but that
+                # final attempt's problems are exactly what the next candidate model
+                # needs to hear, so recompute feedback from it here.
+                if isinstance(exc.last_exception, OpenRouterResponseError):
+                    new_feedback = _feedback_for(exc.last_exception)
+                    if new_feedback is not None:
+                        feedback = new_feedback
                 if index < len(candidates) - 1:
                     logger.warning(
                         "openrouter generate model=%s exhausted %d attempt(s), "
