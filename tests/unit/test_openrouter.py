@@ -414,6 +414,78 @@ class TestOpenRouterClientGenerate:
 
         assert attempts == [1, 2, 3]
 
+    def test_fallback_model_gets_feedback_from_last_attempt_not_a_stale_one(self) -> None:
+        """The primary model's final attempt must still feed its problems forward.
+
+        `with_retries` doesn't invoke `on_retry` for a model's last attempt (it's
+        about to raise, not retry), so the candidate-switch path in `generate()`
+        must recompute feedback from that final failure itself. Otherwise the
+        fallback model would receive feedback describing an earlier, already
+        stale attempt instead of the failure that actually triggered the switch.
+        """
+        incomplete_all_days = week_assessment(canonical_menu()).model_copy(update={"days": []})
+        assessment = week_assessment(canonical_menu())
+        incomplete_last_day = assessment.model_copy(update={"days": assessment.days[:-1]})
+
+        bodies = []
+
+        def side_effect(req, timeout=None):
+            bodies.append(json.loads(req.data.decode("utf-8")))
+            if len(bodies) == 1:
+                return _mock_urlopen(_mock_response(incomplete_all_days.model_dump_json()))
+            if len(bodies) == 2:
+                return _mock_urlopen(_mock_response(incomplete_last_day.model_dump_json()))
+            return _mock_urlopen(
+                _mock_response(_assessment_json(), model="openai/gpt-4.1-mini")
+            )
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            with patch("time.sleep"):
+                client = OpenRouterClient(api_key="test-key", max_retries=2)
+                client.generate(
+                    _make_request(
+                        model="openai/gpt-4o-mini", fallback_models=["openai/gpt-4.1-mini"]
+                    )
+                )
+
+        assert len(bodies) == 3
+        third_attempt_feedback = bodies[2]["messages"][0]["content"][-1]["text"]
+        # Attempt 2 (the primary model's final attempt) was only missing the last day.
+        assert "2026-06-05" in third_attempt_feedback
+        # A stale copy of attempt 1's feedback would additionally claim every other
+        # date is missing too — it must not.
+        assert "2026-06-01" not in third_attempt_feedback
+
+    def test_fallback_model_feedback_does_not_claim_to_be_its_own_previous_response(
+        self,
+    ) -> None:
+        assessment = week_assessment(canonical_menu())
+        incomplete = assessment.model_copy(update={"days": assessment.days[:-1]})
+
+        bodies = []
+
+        def side_effect(req, timeout=None):
+            bodies.append(json.loads(req.data.decode("utf-8")))
+            if len(bodies) == 1:
+                return _mock_urlopen(_mock_response(incomplete.model_dump_json()))
+            return _mock_urlopen(
+                _mock_response(_assessment_json(), model="openai/gpt-4.1-mini")
+            )
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            with patch("time.sleep"):
+                client = OpenRouterClient(api_key="test-key", max_retries=1)
+                client.generate(
+                    _make_request(
+                        model="openai/gpt-4o-mini", fallback_models=["openai/gpt-4.1-mini"]
+                    )
+                )
+
+        assert len(bodies) == 2
+        second_attempt_feedback = bodies[1]["messages"][0]["content"][-1]["text"]
+        assert "A previous attempt by a different model was incomplete" in second_attempt_feedback
+        assert "Your previous response" not in second_attempt_feedback
+
     def test_sends_require_parameters_provider_preference(self) -> None:
         captured = {}
 
