@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -43,6 +43,45 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class _LlmAttemptsSummary:
+    """Running tally of every LLM attempt (across retries and model fallback)."""
+
+    total_attempts: int = 0
+    models_tried: list[str] = field(default_factory=list)
+    total_cost: float = 0.0
+    total_prompt_tokens: int = 0
+    total_completion_tokens: int = 0
+
+    def add_attempt(self, response: object, outcome: dict) -> None:
+        self.total_attempts += 1
+        model = response.get("model") if isinstance(response, dict) else None
+        if model is None:
+            model = outcome.get("model")
+        if model and model not in self.models_tried:
+            self.models_tried.append(model)
+        usage = response.get("usage") if isinstance(response, dict) else None
+        if isinstance(usage, dict):
+            cost = usage.get("cost")
+            if isinstance(cost, (int, float)):
+                self.total_cost += cost
+            prompt_tokens = usage.get("prompt_tokens")
+            if isinstance(prompt_tokens, int):
+                self.total_prompt_tokens += prompt_tokens
+            completion_tokens = usage.get("completion_tokens")
+            if isinstance(completion_tokens, int):
+                self.total_completion_tokens += completion_tokens
+
+    def to_metadata(self) -> dict:
+        return {
+            "total_attempts": self.total_attempts,
+            "models_tried": self.models_tried,
+            "total_cost": round(self.total_cost, 8),
+            "total_prompt_tokens": self.total_prompt_tokens,
+            "total_completion_tokens": self.total_completion_tokens,
+        }
+
+
+@dataclass
 class _WorkflowState:
     started_at: datetime
     status: WorkflowStatus = WorkflowStatus.FAILED
@@ -52,7 +91,7 @@ class _WorkflowState:
     failed_step: str = "provider"
     llm_failure: LlmFailureDetails | None = None
     llm_response: dict | None = None
-    llm_attempts_summary: dict | None = None
+    llm_attempts_summary: _LlmAttemptsSummary | None = None
 
 
 class UserWorkflowExecutor:
@@ -223,7 +262,7 @@ class UserWorkflowExecutor:
         state: _WorkflowState,
         log_context: dict,
     ) -> LlmResult:
-        state.llm_attempts_summary = _new_attempts_summary()
+        state.llm_attempts_summary = _LlmAttemptsSummary()
 
         def _on_attempt(
             attempt: int, feedback: str | None, response: object, outcome: dict
@@ -232,7 +271,7 @@ class UserWorkflowExecutor:
                 attempt,
                 {"attempt": attempt, "feedback_sent": feedback, "response": response, **outcome},
             )
-            _accumulate_attempt_summary(state.llm_attempts_summary, response, outcome)
+            state.llm_attempts_summary.add_attempt(response, outcome)
 
         result = self.llm_client.generate(request, on_attempt=_on_attempt)
         artifacts.save_llm_response(result)
@@ -358,7 +397,7 @@ class UserWorkflowExecutor:
         if state.llm_response is not None:
             metadata["llm_response"] = state.llm_response
         if state.llm_attempts_summary is not None:
-            metadata["llm_attempts_summary"] = state.llm_attempts_summary
+            metadata["llm_attempts_summary"] = state.llm_attempts_summary.to_metadata()
         if state.llm_failure is not None:
             metadata["llm_failure"] = state.llm_failure.to_metadata()
         artifacts.save_metadata(metadata)
@@ -376,36 +415,6 @@ def _discord_disabled_reason(run_context: RunContext, user: UserConfig) -> str |
     if not os.environ.get(user.discord_webhook_env):
         return "env var not set"
     return None
-
-
-def _new_attempts_summary() -> dict:
-    return {
-        "total_attempts": 0,
-        "models_tried": [],
-        "total_cost": 0.0,
-        "total_prompt_tokens": 0,
-        "total_completion_tokens": 0,
-    }
-
-
-def _accumulate_attempt_summary(summary: dict, response: object, outcome: dict) -> None:
-    summary["total_attempts"] += 1
-    model = response.get("model") if isinstance(response, dict) else None
-    if model is None:
-        model = outcome.get("model")
-    if model and model not in summary["models_tried"]:
-        summary["models_tried"].append(model)
-    usage = response.get("usage") if isinstance(response, dict) else None
-    if isinstance(usage, dict):
-        cost = usage.get("cost")
-        if isinstance(cost, (int, float)):
-            summary["total_cost"] = round(summary["total_cost"] + cost, 8)
-        prompt_tokens = usage.get("prompt_tokens")
-        if isinstance(prompt_tokens, int):
-            summary["total_prompt_tokens"] += prompt_tokens
-        completion_tokens = usage.get("completion_tokens")
-        if isinstance(completion_tokens, int):
-            summary["total_completion_tokens"] += completion_tokens
 
 
 def _json_size(menu) -> int:
