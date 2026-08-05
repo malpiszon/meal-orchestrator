@@ -192,7 +192,7 @@ class OpenRouterClient:
                 raise error from exc
             except (urllib.error.URLError, TimeoutError) as exc:
                 if on_attempt is not None:
-                    on_attempt(attempt, feedback, None, _network_error_outcome(exc))
+                    on_attempt(attempt, feedback, None, _network_error_outcome(exc, model))
                 raise
             response = json.loads(raw.decode("utf-8"))
             try:
@@ -317,8 +317,8 @@ def _rejected_outcome(exc: OpenRouterResponseError | OpenRouterHttpError) -> dic
     return outcome
 
 
-def _network_error_outcome(exc: Exception) -> dict[str, Any]:
-    return {"accepted": False, "reason": "network_error", "error": str(exc)}
+def _network_error_outcome(exc: Exception, model: str) -> dict[str, Any]:
+    return {"accepted": False, "reason": "network_error", "error": str(exc), "model": model}
 
 
 def _feedback_for(exc: OpenRouterResponseError, *, cross_model: bool = False) -> str | None:

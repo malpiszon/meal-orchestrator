@@ -893,6 +893,7 @@ class TestOpenRouterClientGenerate:
         assert first_outcome["accepted"] is False
         assert first_outcome["reason"] == "network_error"
         assert "connection refused" in first_outcome["error"]
+        assert first_outcome["model"] == "openai/gpt-4o-mini"
 
     def test_raises_retry_error_when_content_never_matches_schema(self) -> None:
         with patch(
