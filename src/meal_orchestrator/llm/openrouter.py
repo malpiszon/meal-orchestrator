@@ -241,7 +241,7 @@ class OpenRouterClient:
                 # final attempt's problems are exactly what the next candidate model
                 # needs to hear, so recompute feedback from it here.
                 if isinstance(exc.last_exception, OpenRouterResponseError):
-                    new_feedback = _feedback_for(exc.last_exception)
+                    new_feedback = _feedback_for(exc.last_exception, cross_model=True)
                     if new_feedback is not None:
                         feedback = new_feedback
                 if index < len(candidates) - 1:
@@ -321,16 +321,20 @@ def _network_error_outcome(exc: Exception) -> dict[str, Any]:
     return {"accepted": False, "reason": "network_error", "error": str(exc)}
 
 
-def _feedback_for(exc: OpenRouterResponseError) -> str | None:
+def _feedback_for(exc: OpenRouterResponseError, *, cross_model: bool = False) -> str | None:
+    # `cross_model` distinguishes "you, just now" from "a prior attempt by a
+    # different model" — this feedback is only ever true from the first-person
+    # perspective when it's addressed back to the same model that produced it.
+    subject = "A previous attempt by a different model" if cross_model else "Your previous response"
     if isinstance(exc, StructuredOutputError):
         return (
-            "Your previous response did not match the required JSON schema "
+            f"{subject} did not match the required JSON schema "
             f"({exc.parse_error}). Return a response that strictly matches the schema."
         )
     if isinstance(exc, IncompleteAssessmentError):
         joined = "; ".join(exc.problems)
         return (
-            f"Your previous response was incomplete: {joined}. Assess every meal and "
+            f"{subject} was incomplete: {joined}. Assess every meal and "
             "every variant listed in the menu JSON — do not skip any of them."
         )
     return None

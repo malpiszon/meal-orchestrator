@@ -456,6 +456,36 @@ class TestOpenRouterClientGenerate:
         # date is missing too — it must not.
         assert "2026-06-01" not in third_attempt_feedback
 
+    def test_fallback_model_feedback_does_not_claim_to_be_its_own_previous_response(
+        self,
+    ) -> None:
+        assessment = week_assessment(canonical_menu())
+        incomplete = assessment.model_copy(update={"days": assessment.days[:-1]})
+
+        bodies = []
+
+        def side_effect(req, timeout=None):
+            bodies.append(json.loads(req.data.decode("utf-8")))
+            if len(bodies) == 1:
+                return _mock_urlopen(_mock_response(incomplete.model_dump_json()))
+            return _mock_urlopen(
+                _mock_response(_assessment_json(), model="openai/gpt-4.1-mini")
+            )
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            with patch("time.sleep"):
+                client = OpenRouterClient(api_key="test-key", max_retries=1)
+                client.generate(
+                    _make_request(
+                        model="openai/gpt-4o-mini", fallback_models=["openai/gpt-4.1-mini"]
+                    )
+                )
+
+        assert len(bodies) == 2
+        second_attempt_feedback = bodies[1]["messages"][0]["content"][-1]["text"]
+        assert "A previous attempt by a different model was incomplete" in second_attempt_feedback
+        assert "Your previous response" not in second_attempt_feedback
+
     def test_sends_require_parameters_provider_preference(self) -> None:
         captured = {}
 
