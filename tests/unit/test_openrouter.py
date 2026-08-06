@@ -24,7 +24,11 @@ def _make_request(
 ) -> LlmRequest:
     return LlmRequest(
         model=model,
-        payload=PromptPayload(user_prompt="Choose the best meals.", menu=canonical_menu()),
+        payload=PromptPayload(
+            app_prompt="Assess every meal variant.",
+            user_prompt="Choose the best meals.",
+            menu=canonical_menu(),
+        ),
         timeout_seconds=30,
         fallback_models=fallback_models or [],
     )
@@ -529,9 +533,9 @@ class TestOpenRouterClientGenerate:
         content = captured["body"]["messages"][0]["content"]
         assert isinstance(content, list)
         texts = [block["text"] for block in content]
+        assert any("Assess every meal variant." in t for t in texts)
         assert any("Choose the best meals." in t for t in texts)
         assert any("Canonical menu JSON:" in t for t in texts)
-        assert any("Assess every meal variant" in t for t in texts)
 
     def test_json_block_is_separate_from_instructions(self) -> None:
         captured = {}

@@ -42,7 +42,8 @@ class VariantAssessment(BaseModel):
         le=10,
         description=(
             "Overall quality score for this specific meal variant, from 1 (poor) to 10 "
-            "(excellent), based on the judging criteria given in the user's instructions."
+            "(excellent), based on the judging criteria given in the app and user "
+            "instructions."
         ),
     )
     justifications: list[Justification] = Field(

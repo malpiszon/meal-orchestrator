@@ -16,7 +16,8 @@ For each configured user, per run:
 1. Fetch the provider's menu for the target week (Monday–Friday).
 2. Normalize the raw provider response into a compact canonical menu
    (purchased meal types and sizes only).
-3. Build a prompt from the user's own instructions plus the canonical menu.
+3. Build a prompt from the app-level rules (`prompts/app.md`), the user's own
+   instructions, and the canonical menu.
 4. Send the prompt to an LLM through OpenRouter, requesting a structured
    assessment (score + justifications for every meal variant), retrying with
    feedback if the response is malformed or incomplete.
@@ -82,7 +83,9 @@ tests/
 config/
   app.example.yaml     runtime settings
   users.example.yaml   per-user settings
-prompts/               per-user prompt files referenced from users.yaml
+prompts/
+  app.md                common rules sent to the LLM for every user
+  {user}.local.md        per-user prompt files referenced from users.yaml
 ```
 
 ## Configuration

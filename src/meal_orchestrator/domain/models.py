@@ -115,6 +115,7 @@ class ProviderResult:
 
 @dataclass(frozen=True)
 class PromptPayload:
+    app_prompt: str
     user_prompt: str
     menu: CanonicalMenu
 
