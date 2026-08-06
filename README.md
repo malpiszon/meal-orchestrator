@@ -85,7 +85,8 @@ config/
   users.example.yaml   per-user settings
 prompts/
   app.md                common rules sent to the LLM for every user
-  {user}.local.md        per-user prompt files referenced from users.yaml
+  example.md            template for a per-user prompt file
+  {user}.local.md        per-user prompt files (gitignored), referenced from users.yaml
 ```
 
 ## Configuration
@@ -97,6 +98,9 @@ Copy the example files and edit them:
 - `config/users.example.yaml` — one entry per user: provider, provider
   offering id, email, Discord ids, prompt file, and purchased meals (type +
   size).
+- `prompts/example.md` — template for a user's own prompt file (their
+  personal context and preferences, in any language); copy it to
+  `prompts/<user>.local.md` and point that user's `prompt_file` at it.
 
 Secrets are read from environment variables, never from YAML:
 
