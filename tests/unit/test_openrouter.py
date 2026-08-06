@@ -145,61 +145,15 @@ class TestOpenRouterClientGenerate:
 
         assert result.token_usage == {"prompt_tokens": 100, "completion_tokens": 50}
 
-    def test_returns_response_metadata(self) -> None:
-        routing_metadata = {
-            "requested": "openai/gpt-4o-mini",
-            "strategy": "direct",
-            "region": "WAW",
-            "summary": "available=2, selected=OpenAI",
-            "attempt": 1,
-            "is_byok": False,
-            "endpoints": {
-                "total": 3,
-                "available": [
-                    {
-                        "provider": "OpenAI",
-                        "model": "openai/gpt-4o-mini-2025-08-07",
-                        "selected": True,
-                    },
-                    {
-                        "provider": "Azure",
-                        "model": "openai/gpt-4o-mini-2025-08-07",
-                        "selected": False,
-                    },
-                ],
-            },
-        }
+    def test_returns_attempt_number(self) -> None:
         with patch(
             "urllib.request.urlopen",
-            return_value=_mock_urlopen(
-                _mock_response(_assessment_json(), openrouter_metadata=routing_metadata)
-            ),
+            return_value=_mock_urlopen(_mock_response(_assessment_json())),
         ):
             client = OpenRouterClient(api_key="test-key")
             result = client.generate(_make_request())
 
-        assert result.response_metadata == {
-            "attempt": 1,
-            "generation_id": None,
-            "model": "openai/gpt-4o-mini",
-            "provider": None,
-            "finish_reason": None,
-            "native_finish_reason": None,
-            "response_error": None,
-            "choice_error": None,
-            "usage": {"prompt_tokens": 100, "completion_tokens": 50},
-            "openrouter_metadata": {
-                "requested": "openai/gpt-4o-mini",
-                "strategy": "direct",
-                "region": "WAW",
-                "summary": "available=2, selected=OpenAI",
-                "attempt": 1,
-                "is_byok": False,
-                "selected_endpoints": [
-                    {"provider": "OpenAI", "model": "openai/gpt-4o-mini-2025-08-07"}
-                ],
-            },
-        }
+        assert result.attempt == 1
 
     def test_sends_bearer_token(self) -> None:
         captured = {}

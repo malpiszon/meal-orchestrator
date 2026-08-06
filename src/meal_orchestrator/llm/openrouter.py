@@ -300,8 +300,8 @@ def _build_result(
     return LlmResult(
         structured=assessment,
         model=model,
+        attempt=attempt,
         token_usage=token_usage,
-        response_metadata=_response_metadata(response, attempt, compact_routing_metadata=True),
     )
 
 
@@ -453,14 +453,9 @@ def _first_choice(response: dict[str, Any]) -> dict[str, Any]:
     return choice if isinstance(choice, dict) else {}
 
 
-def _response_metadata(
-    response: Any, attempt: int, *, compact_routing_metadata: bool = False
-) -> dict[str, Any]:
+def _response_metadata(response: Any, attempt: int) -> dict[str, Any]:
     response = response if isinstance(response, dict) else {}
     choice = _first_choice(response)
-    routing_metadata = response.get("openrouter_metadata")
-    if compact_routing_metadata:
-        routing_metadata = _compact_routing_metadata(routing_metadata)
     return {
         "attempt": attempt,
         "generation_id": response.get("id"),
@@ -471,33 +466,8 @@ def _response_metadata(
         "response_error": response.get("error"),
         "choice_error": choice.get("error"),
         "usage": response.get("usage"),
-        "openrouter_metadata": routing_metadata,
+        "openrouter_metadata": response.get("openrouter_metadata"),
     }
-
-
-def _compact_routing_metadata(metadata: Any) -> Any:
-    if not isinstance(metadata, dict):
-        return metadata
-
-    compact = {
-        key: metadata[key]
-        for key in ("requested", "strategy", "region", "summary", "attempt", "is_byok")
-        if key in metadata
-    }
-    endpoints = metadata.get("endpoints")
-    if not isinstance(endpoints, dict):
-        return compact
-    available = endpoints.get("available")
-    if not isinstance(available, list):
-        return compact
-    selected_endpoints = [
-        {key: endpoint[key] for key in ("provider", "model") if key in endpoint}
-        for endpoint in available
-        if isinstance(endpoint, dict) and endpoint.get("selected")
-    ]
-    if selected_endpoints:
-        compact["selected_endpoints"] = selected_endpoints
-    return compact
 
 
 _UPSTREAM_MESSAGE_MAX_CHARS = 300

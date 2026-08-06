@@ -69,7 +69,7 @@ class FakeLlmClient:
         return LlmResult(
             structured=week_assessment(request.payload.menu),
             model=request.model,
-            response_metadata={"generation_id": "gen-example", "attempt": self.attempt},
+            attempt=self.attempt,
         )
 
 
@@ -141,7 +141,7 @@ class FallbackLlmClient:
         return LlmResult(
             structured=week_assessment(request.payload.menu),
             model="google/gemini-3.1-flash-lite",
-            response_metadata={"generation_id": "gen-example", "attempt": 4},
+            attempt=4,
         )
 
 
@@ -398,7 +398,8 @@ def test_artifacts_written_on_successful_run(tmp_path: Path) -> None:
     assert metadata["status"] == "completed"
     assert metadata["user_id"] == "alan"
     assert metadata["app_version"] == __version__
-    assert metadata["llm_response"] == {"generation_id": "gen-example", "attempt": 1}
+    llm_request = json.loads((run_dir / "llm_request.json").read_text())
+    assert metadata["final_model"] == llm_request["model"]
     assert metadata["llm_attempts_summary"] == {
         "total_attempts": 1,
         "models_tried": [],

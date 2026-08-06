@@ -45,7 +45,7 @@ class FakeLlmClient:
         return LlmResult(
             structured=week_assessment(request.payload.menu),
             model=self.served_model or request.model,
-            response_metadata={"attempt": self.attempt},
+            attempt=self.attempt,
         )
 
 
@@ -287,7 +287,9 @@ def test_orchestrator_wires_configured_max_retries_into_llm_client(monkeypatch, 
             captured_kwargs.update(kwargs)
 
         def generate(self, request, **_kwargs):
-            return LlmResult(structured=week_assessment(request.payload.menu), model=request.model)
+            return LlmResult(
+                structured=week_assessment(request.payload.menu), model=request.model, attempt=1
+            )
 
     monkeypatch.setattr("meal_orchestrator.orchestrator.OpenRouterClient", SpyOpenRouterClient)
 
