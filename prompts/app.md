@@ -99,8 +99,7 @@ Anchor scores to the absolute quality criteria defined above, not to how this we
 | 7 | Fine |
 | 6 | Average |
 | 5 | Below average |
-| 3–4 | Poor choice |
-| 1–2 | Fails nearly every criterion |
+| 4 and below | Poor choice |
 
 Don't inflate scores by default — reserve 9–10 for variants that genuinely meet the criteria above, and don't shy away from low scores when the criteria call for them.
 
