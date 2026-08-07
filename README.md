@@ -1,5 +1,10 @@
 # meal-orchestrator
 
+[![GitHubPackage][GitHubPackageBadge]][GitHubPackageLink]
+[![DockerPublishing][DockerPublishingBadge]][DockerLink]
+[![DockerSize][DockerSizeBadge]][DockerLink]
+[![DockerPulls][DockerPullsBadge]][DockerLink]
+
 A scheduled automation service that fetches a diet catering provider's weekly
 menu, filters it down to what a user actually purchased, asks an LLM (via
 OpenRouter) to score and justify every meal variant, and delivers the result
@@ -235,3 +240,10 @@ auto-generated notes.
 - No exactly-once delivery guarantee for email/Discord.
 - No internal scheduler — a weekly run must be triggered externally (cron,
   systemd timer, CI schedule, etc.).
+
+[GitHubPackageBadge]: https://github.com/malpiszon/meal-orchestrator/actions/workflows/release.yml/badge.svg
+[GitHubPackageLink]: https://github.com/malpiszon/meal-orchestrator/pkgs/container/meal-orchestrator
+[DockerPublishingBadge]: https://github.com/malpiszon/meal-orchestrator/actions/workflows/release.yml/badge.svg
+[DockerPullsBadge]: https://badgen.net/docker/pulls/malpiszon/meal-orchestrator?icon=docker&label=Docker+Pulls&labelColor=black&color=green
+[DockerSizeBadge]: https://badgen.net/docker/size/malpiszon/meal-orchestrator?icon=docker&label=Docker+Size&labelColor=black&color=green
+[DockerLink]: https://hub.docker.com/r/malpiszon/meal-orchestrator
