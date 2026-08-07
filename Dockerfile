@@ -23,5 +23,9 @@ WORKDIR /app
 COPY --from=builder /app/dist/*.whl ./
 RUN pip install --no-cache-dir ./*.whl && rm ./*.whl
 
+# Common to all users and version-controlled, unlike each user's own
+# prompts/*.local.md file (gitignored; see prompts/example.md for the shape).
+COPY prompts/app.md ./prompts/app.md
+
 ENTRYPOINT ["meal-orchestrator"]
 CMD ["--help"]

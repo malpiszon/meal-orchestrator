@@ -25,7 +25,9 @@ def _config(
 def _llm_request() -> LlmRequest:
     return LlmRequest(
         model="test-model",
-        payload=PromptPayload(user_prompt="Choose meals.", menu=canonical_menu()),
+        payload=PromptPayload(
+            app_prompt="Score every variant.", user_prompt="Choose meals.", menu=canonical_menu()
+        ),
         timeout_seconds=30,
     )
 
@@ -69,6 +71,7 @@ def test_artifacts_content(tmp_path: Path) -> None:
     run.save_llm_request(_llm_request())
     req = json.loads((tmp_path / "artifacts" / "alan" / "run-1" / "llm_request.json").read_text())
     assert req["model"] == "test-model"
+    assert req["app_prompt"] == "Score every variant."
     assert req["user_prompt"] == "Choose meals."
     assert "days" in req["menu"]
 

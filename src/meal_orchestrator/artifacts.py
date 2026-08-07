@@ -60,6 +60,7 @@ class _FilesystemRunArtifacts(RunArtifacts):
                 {
                     "model": request.model,
                     "timeout_seconds": request.timeout_seconds,
+                    "app_prompt": request.payload.app_prompt,
                     "user_prompt": request.payload.user_prompt,
                     "menu": request.payload.menu.to_compact_dict(),
                 },
