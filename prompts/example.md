@@ -1,2 +1,2 @@
-Choose the best available meals for the week. Prefer balanced meals with high
-protein, reasonable sugar, and clear ingredients.
+I'm generally healthy with no dietary restrictions. I prefer meals with
+high protein and moderate sugar, and I don't like tofu.

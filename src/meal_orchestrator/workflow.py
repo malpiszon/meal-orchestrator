@@ -237,7 +237,8 @@ class UserWorkflowExecutor:
         log_context: dict,
     ) -> LlmRequest:
         prompt_payload = build_prompt_payload(
-            prompt_file=self.project_root / user.prompt_file,
+            app_prompt_file=self.project_root / "prompts" / "app.md",
+            user_prompt_file=self.project_root / user.prompt_file,
             menu=menu,
         )
         logger.info("prompt payload built", extra={**log_context, "step": "prompt"})

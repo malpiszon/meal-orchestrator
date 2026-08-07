@@ -45,13 +45,6 @@ _NON_RETRYABLE_FINISH_ERROR_TYPES = frozenset(
 _SLOW_CLEARING_ERROR_TYPES = frozenset({"rate_limit_exceeded", "provider_overloaded"})
 _SLOW_CLEARING_BASE_DELAY = 15.0
 
-_SCAFFOLDING_INSTRUCTION = (
-    "Assess every meal variant present in the menu JSON below: give each one a score "
-    "and up to two short justification points. Do not select a single winner and skip "
-    "the rest — every variant of every meal of every day must be assessed."
-)
-
-
 @dataclass(frozen=True)
 class LlmFailureDetails:
     """Diagnostic data returned with an unusable OpenRouter completion."""
@@ -121,9 +114,9 @@ def _build_message_content(
         separators=(",", ":"),
     )
     blocks = [
+        {"type": "text", "text": f"App instructions:\n{payload.app_prompt}"},
         {"type": "text", "text": f"User instructions:\n{payload.user_prompt}"},
         {"type": "text", "text": f"Canonical menu JSON:\n{menu_json}"},
-        {"type": "text", "text": _SCAFFOLDING_INSTRUCTION},
     ]
     if feedback:
         blocks.append({"type": "text", "text": feedback})
