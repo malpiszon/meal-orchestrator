@@ -90,7 +90,6 @@ class _WorkflowState:
     error: str | None = None
     failed_step: str = "provider"
     llm_failure: LlmFailureDetails | None = None
-    llm_response: dict | None = None
     llm_attempts_summary: _LlmAttemptsSummary | None = None
 
 
@@ -136,7 +135,6 @@ class UserWorkflowExecutor:
             llm_result = self._generate_plan(llm_request, artifacts, state, log_context)
             state.model = llm_result.model
             state.token_usage = llm_result.token_usage
-            state.llm_response = llm_result.response_metadata
 
             state.failed_step = "email"
             self._deliver_email(user, run_context, menu, llm_result, log_context)
@@ -146,7 +144,7 @@ class UserWorkflowExecutor:
 
             logger.info("user workflow completed", extra={**log_context, "step": "complete"})
             state.status = WorkflowStatus.COMPLETED
-            retry_count = (llm_result.response_metadata or {}).get("attempt", 1) - 1
+            retry_count = llm_result.attempt - 1
             return WorkflowResult(
                 user_id=user.id,
                 status=WorkflowStatus.COMPLETED,
@@ -385,7 +383,7 @@ class UserWorkflowExecutor:
             "provider": run_context.provider_id,
             "week_start": run_context.week_start.isoformat(),
             "week_end": run_context.week_end.isoformat(),
-            "model": state.model,
+            "final_model": state.model,
             "token_usage": state.token_usage,
             "started_at": state.started_at.isoformat(),
             "ended_at": datetime.now(UTC).isoformat(),
@@ -395,8 +393,6 @@ class UserWorkflowExecutor:
             metadata["error"] = state.error
         if state.status == WorkflowStatus.FAILED:
             metadata["failed_step"] = state.failed_step
-        if state.llm_response is not None:
-            metadata["llm_response"] = state.llm_response
         if state.llm_attempts_summary is not None:
             metadata["llm_attempts_summary"] = state.llm_attempts_summary.to_metadata()
         if state.llm_failure is not None:

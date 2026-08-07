@@ -132,8 +132,8 @@ class LlmRequest:
 class LlmResult:
     structured: WeekAssessment
     model: str
+    attempt: int
     token_usage: dict[str, int] | None = None
-    response_metadata: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)

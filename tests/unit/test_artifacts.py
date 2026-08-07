@@ -33,7 +33,7 @@ def _llm_request() -> LlmRequest:
 
 
 def _llm_result() -> LlmResult:
-    return LlmResult(structured=week_assessment(canonical_menu()), model="test-model")
+    return LlmResult(structured=week_assessment(canonical_menu()), model="test-model", attempt=1)
 
 
 def test_saves_all_artifacts(tmp_path: Path) -> None:
@@ -80,7 +80,9 @@ def test_skips_llm_response_artifact_when_structured_is_invalid(tmp_path: Path) 
     store = ArtifactStore(_config(tmp_path))
     run = store.for_run("run-1", "example")
 
-    run.save_llm_response(LlmResult(structured=None, model="test-model"))  # type: ignore[arg-type]
+    run.save_llm_response(
+        LlmResult(structured=None, model="test-model", attempt=1)  # type: ignore[arg-type]
+    )
 
     assert not (tmp_path / "artifacts" / "example" / "run-1" / "llm_response.json").exists()
 
