@@ -241,9 +241,9 @@ auto-generated notes.
 - No internal scheduler — a weekly run must be triggered externally (cron,
   systemd timer, CI schedule, etc.).
 
-[GitHubPackageBadge]: https://img.shields.io/github/actions/workflow/status/malpiszon/meal-orchestrator/release.yml?label=GitHub%20Package
+[GitHubPackageBadge]: https://img.shields.io/github/actions/workflow/status/malpiszon/meal-orchestrator/release.yml?label=GHCR
 [GitHubPackageLink]: https://github.com/malpiszon/meal-orchestrator/pkgs/container/meal-orchestrator
-[DockerPublishingBadge]: https://img.shields.io/github/actions/workflow/status/malpiszon/meal-orchestrator/release.yml?label=Docker%20Publishing
+[DockerPublishingBadge]: https://img.shields.io/github/actions/workflow/status/malpiszon/meal-orchestrator/release.yml?label=Docker%20Hub
 [DockerPullsBadge]: https://badgen.net/docker/pulls/malpiszon/meal-orchestrator?icon=docker&label=Docker+Pulls&labelColor=black&color=green
 [DockerSizeBadge]: https://badgen.net/docker/size/malpiszon/meal-orchestrator?icon=docker&label=Docker+Size&labelColor=black&color=green
 [DockerLink]: https://hub.docker.com/r/malpiszon/meal-orchestrator
