@@ -10,6 +10,8 @@ Each variant contains:
 - a composition (`composition`)
 - nutritional values (`nutrition`)
 
+Variants within the same meal have very similar calorie content, so calorie content is not a meaningful criterion when comparing them.
+
 Below, in the "User instructions" section, you'll find context and preferences for the person you're evaluating the menu for — take them into account.
 
 ## Goal
