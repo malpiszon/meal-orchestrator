@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 from html import escape
 
+from meal_orchestrator import __version__
 from meal_orchestrator.domain import (
     CanonicalMeal,
     CanonicalMenu,
@@ -73,7 +74,7 @@ def render_html(assessment: WeekAssessment, menu: CanonicalMenu, run_id: str) ->
 <body>
 <div class="card">
 {body}
-<div class="footer">Run ID: {escape(run_id)}</div>
+<div class="footer">Run ID: {escape(run_id)} &middot; v{escape(__version__)}</div>
 </div>
 </body>
 </html>

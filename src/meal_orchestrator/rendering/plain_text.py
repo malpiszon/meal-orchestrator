@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from meal_orchestrator import __version__
 from meal_orchestrator.domain import CanonicalMeal, CanonicalMenu, MealAssessment, WeekAssessment
 from meal_orchestrator.rendering.join import iter_days, iter_meals, sorted_variants_by_score
 from meal_orchestrator.rendering.labels import DAY_EMOJI, meal_label, weekday_name
@@ -16,7 +17,7 @@ def render_plain_text(assessment: WeekAssessment, menu: CanonicalMenu, run_id: s
             lines.append(f"{emoji} {label}")
             lines.append("")
             lines.extend(_render_meal(meal, canonical_meal))
-    lines.append(f"Run ID: {run_id}")
+    lines.append(f"Run ID: {run_id} · v{__version__}")
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
