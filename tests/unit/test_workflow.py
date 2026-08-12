@@ -626,6 +626,87 @@ def test_normalization_error_saves_provider_raw_artifact(tmp_path: Path) -> None
     assert metadata["status"] == "failed"
 
 
+def test_fetch_menu_alone_returns_menu_outcome_without_running_llm(tmp_path) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    provider = FakeProvider()
+    llm = FakeLlmClient()
+
+    outcome = _executor(tmp_path, provider, llm, FakeEmailClient(), FakeDiscordClient()).fetch_menu(
+        user_config(PathLikePrompt(prompt_file, tmp_path)),
+        _context(dry_run=False),
+    )
+
+    assert outcome.result is None
+    assert outcome.menu is not None
+    assert outcome.state is not None
+    assert outcome.log_context["user_id"] == "alan"
+    assert llm.requests == []
+
+
+def test_fetch_menu_alone_returns_terminal_result_on_menu_unavailable(
+    tmp_path, monkeypatch
+) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    monkeypatch.setenv("DISCORD_USER_WEBHOOK_URL", "https://example.com/user")
+    discord = FakeDiscordClient()
+
+    outcome = _executor(
+        tmp_path, FakeProvider(complete=False), FakeLlmClient(), FakeEmailClient(), discord
+    ).fetch_menu(
+        user_config(PathLikePrompt(prompt_file, tmp_path)),
+        _context(dry_run=False),
+    )
+
+    assert outcome.result is not None
+    assert outcome.result.status == WorkflowStatus.MENU_UNAVAILABLE
+    assert outcome.menu is None
+    assert len(discord.messages) == 1
+
+
+def test_execute_from_menu_alone_runs_llm_and_email_given_prefetched_menu(tmp_path) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    llm = FakeLlmClient()
+    email = FakeEmailClient()
+    executor = _executor(tmp_path, FakeProvider(), llm, email, FakeDiscordClient())
+    user = user_config(PathLikePrompt(prompt_file, tmp_path))
+    run_context = _context(dry_run=False)
+
+    outcome = executor.fetch_menu(user, run_context)
+    result = executor.execute_from_menu(
+        user, run_context, outcome.menu, outcome.artifacts, outcome.state, outcome.log_context
+    )
+
+    assert result.status == WorkflowStatus.COMPLETED
+    assert len(llm.requests) == 1
+    assert len(email.messages) == 1
+
+
+def test_execute_split_into_two_calls_matches_execute_in_one_call(tmp_path) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    user = user_config(PathLikePrompt(prompt_file, tmp_path))
+    run_context = _context(dry_run=False)
+
+    combined = _executor(
+        tmp_path, FakeProvider(), FakeLlmClient(), FakeEmailClient(), FakeDiscordClient()
+    ).execute(user, run_context)
+
+    executor = _executor(
+        tmp_path, FakeProvider(), FakeLlmClient(), FakeEmailClient(), FakeDiscordClient()
+    )
+    outcome = executor.fetch_menu(user, run_context)
+    split = executor.execute_from_menu(
+        user, run_context, outcome.menu, outcome.artifacts, outcome.state, outcome.log_context
+    )
+
+    assert split.status == combined.status
+    assert split.retry_count == combined.retry_count
+    assert split.model == combined.model
+
+
 def _executor(
     tmp_path, provider, llm, email, discord, artifact_store=None, config=None
 ) -> UserWorkflowExecutor:

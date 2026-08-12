@@ -1,5 +1,9 @@
 runtime:
   timezone: "Europe/Warsaw"
+  # Max number of users whose LLM/email/Discord steps run concurrently.
+  # Menu fetching always stays sequential regardless of this value, to
+  # avoid bursting the menu provider. Defaults to 5 when omitted.
+  max_concurrent_users: 5
 
 llm:
   provider: "openrouter"

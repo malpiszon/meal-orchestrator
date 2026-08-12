@@ -24,7 +24,12 @@ def load_app_config(path: Path) -> AppConfig:
     data = _load_yaml(path)
     llm_model = _required(data, "llm", "model")
     return AppConfig(
-        runtime=RuntimeConfig(timezone=_required(data, "runtime", "timezone")),
+        runtime=RuntimeConfig(
+            timezone=_required(data, "runtime", "timezone"),
+            max_concurrent_users=_parse_max_concurrent_users(
+                _optional(data, "runtime", "max_concurrent_users")
+            ),
+        ),
         llm=LlmConfig(
             provider=_required(data, "llm", "provider"),
             model=llm_model,
@@ -53,6 +58,14 @@ def _parse_fallback_models(raw: Any, model: str) -> list[str]:
         raise ConfigError("llm.fallback_models must be a list of strings")
     if model in raw:
         raise ConfigError(f"llm.fallback_models must not include the primary model: {model}")
+    return raw
+
+
+def _parse_max_concurrent_users(raw: Any) -> int:
+    if raw is None:
+        return RuntimeConfig.max_concurrent_users
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 1:
+        raise ConfigError("runtime.max_concurrent_users must be a positive integer")
     return raw
 
 

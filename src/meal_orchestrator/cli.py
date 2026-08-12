@@ -21,6 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--week-start", type=date.fromisoformat)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--llm-model")
+    parser.add_argument("--max-concurrent-users", type=int)
     parser.add_argument("--log-level", default="INFO")
     return parser
 
@@ -47,6 +48,7 @@ def main(argv: list[str] | None = None) -> int:
             week_start=args.week_start,
             dry_run=args.dry_run,
             llm_model=args.llm_model,
+            max_concurrent_users=args.max_concurrent_users,
         )
     )
     return 1 if any(result.status == WorkflowStatus.FAILED for result in results) else 0

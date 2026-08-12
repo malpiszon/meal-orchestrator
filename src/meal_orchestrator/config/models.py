@@ -9,6 +9,7 @@ from meal_orchestrator.domain import PurchasedMeal
 @dataclass(frozen=True)
 class RuntimeConfig:
     timezone: str
+    max_concurrent_users: int = 5
 
 
 @dataclass(frozen=True)

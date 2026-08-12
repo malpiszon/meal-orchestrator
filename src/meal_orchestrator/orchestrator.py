@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -41,6 +42,7 @@ class RunOptions:
     week_start: date | None = None
     dry_run: bool = False
     llm_model: str | None = None
+    max_concurrent_users: int | None = None
 
 
 class RunOrchestrator:
@@ -73,10 +75,16 @@ class RunOrchestrator:
         week_start = options.week_start or nearest_upcoming_monday(today)
         week_end = week_end_for(week_start)
         selected_users = self._select_users(options.user_id)
+        max_concurrent_users = self._resolve_max_concurrent_users(options)
 
         logger.info(
             "run started",
-            extra={"run_id": run_id, "week_start": week_start.isoformat(), "step": "start"},
+            extra={
+                "run_id": run_id,
+                "week_start": week_start.isoformat(),
+                "step": "start",
+                "max_concurrent_users": max_concurrent_users,
+            },
         )
 
         discord_client = self.discord_client_override or build_discord_client()
@@ -125,10 +133,49 @@ class RunOrchestrator:
         except Exception:
             logger.warning("artifact cleanup failed", exc_info=True, extra={"run_id": run_id})
 
-        results: list[WorkflowResult] = []
+        ops_webhook = self.app_config.delivery.operational_discord_webhook_env
+
+        def _send_ops_notification_for(user_id: str, result: WorkflowResult) -> None:
+            if options.dry_run or not ops_webhook:
+                return
+            if os.environ.get(ops_webhook):
+                _send_operational_notification(
+                    discord_client=discord_client,
+                    webhook_env=ops_webhook,
+                    user_id=user_id,
+                    run_id=run_id,
+                    result=result,
+                    expected_model=model,
+                )
+            else:
+                logger.info(
+                    "operational discord notification skipped: env var not set",
+                    extra={
+                        "run_id": run_id,
+                        "user_id": user_id,
+                        "step": "ops_notify",
+                        "webhook_env": ops_webhook,
+                    },
+                )
+
+        results_by_user_id: dict[str, WorkflowResult] = {}
+        # Outcome element is a workflow._MenuFetchOutcome (private, not imported here).
+        pending: dict[str, tuple[UserWorkflowExecutor, UserConfig, RunContext, object]] = {}
+
+        # Phase A: sequential menu fetch for every user. Never parallelized —
+        # concurrent requests to the menu provider risk looking like a
+        # burst/DOS as the number of users grows.
         for user in selected_users:
             provider_id = (
                 options.provider_override or user.provider or self.app_config.default_provider
+            )
+            run_context = RunContext(
+                run_id=run_id,
+                week_start=week_start,
+                week_end=week_end,
+                dry_run=options.dry_run,
+                provider_id=provider_id,
+                llm_model=options.llm_model,
             )
             try:
                 provider = provider_factory(provider_id)
@@ -141,17 +188,7 @@ class RunOrchestrator:
                     project_root=self.project_root,
                     artifact_store=artifact_store,
                 )
-                result = executor.execute(
-                    user,
-                    RunContext(
-                        run_id=run_id,
-                        week_start=week_start,
-                        week_end=week_end,
-                        dry_run=options.dry_run,
-                        provider_id=provider_id,
-                        llm_model=options.llm_model,
-                    ),
-                )
+                outcome = executor.fetch_menu(user, run_context)
             except Exception as exc:
                 logger.exception(
                     "user workflow setup failed",
@@ -169,30 +206,59 @@ class RunOrchestrator:
                     detail=str(exc),
                     failed_step="setup",
                 )
+                results_by_user_id[user.id] = result
+                _send_ops_notification_for(user.id, result)
+                continue
 
-            ops_webhook = self.app_config.delivery.operational_discord_webhook_env
-            if not options.dry_run and ops_webhook:
-                if os.environ.get(ops_webhook):
-                    _send_operational_notification(
-                        discord_client=discord_client,
-                        webhook_env=ops_webhook,
-                        user_id=user.id,
-                        run_id=run_id,
-                        result=result,
-                        expected_model=model,
-                    )
-                else:
-                    logger.info(
-                        "operational discord notification skipped: env var not set",
-                        extra={
-                            "run_id": run_id,
-                            "user_id": user.id,
-                            "step": "ops_notify",
-                            "webhook_env": ops_webhook,
-                        },
-                    )
+            if outcome.result is not None:
+                results_by_user_id[user.id] = outcome.result
+                _send_ops_notification_for(user.id, outcome.result)
+            else:
+                pending[user.id] = (executor, user, run_context, outcome)
 
-            results.append(result)
+        # Phase B: bounded-parallel remainder (prompt -> LLM -> email -> Discord)
+        # for every user whose menu was fetched successfully.
+        if pending:
+            max_workers = min(len(pending), max_concurrent_users)
+            with ThreadPoolExecutor(
+                max_workers=max_workers, thread_name_prefix="user-worker"
+            ) as pool:
+                future_to_user_id: dict[Future[WorkflowResult], str] = {
+                    pool.submit(
+                        pending_executor.execute_from_menu,
+                        pending_user,
+                        pending_run_context,
+                        pending_outcome.menu,
+                        pending_outcome.artifacts,
+                        pending_outcome.state,
+                        pending_outcome.log_context,
+                    ): user_id
+                    for user_id, (
+                        pending_executor,
+                        pending_user,
+                        pending_run_context,
+                        pending_outcome,
+                    ) in pending.items()
+                }
+                for future in as_completed(future_to_user_id):
+                    user_id = future_to_user_id[future]
+                    try:
+                        result = future.result()
+                    except Exception as exc:
+                        logger.exception(
+                            "user workflow worker failed unexpectedly",
+                            extra={"run_id": run_id, "user_id": user_id, "step": "failed"},
+                        )
+                        result = WorkflowResult(
+                            user_id=user_id,
+                            status=WorkflowStatus.FAILED,
+                            detail=str(exc),
+                            failed_step="worker",
+                        )
+                    results_by_user_id[user_id] = result
+                    _send_ops_notification_for(user_id, result)
+
+        results = [results_by_user_id[user.id] for user in selected_users]
 
         logger.info(
             "run completed",
@@ -205,6 +271,11 @@ class RunOrchestrator:
         if options.dry_run:
             default_model = self.app_config.llm.dry_run_model or default_model
         return options.llm_model or default_model
+
+    def _resolve_max_concurrent_users(self, options: RunOptions) -> int:
+        if options.max_concurrent_users is not None and options.max_concurrent_users >= 1:
+            return options.max_concurrent_users
+        return self.app_config.runtime.max_concurrent_users
 
     def _select_users(self, user_id: str | None) -> list[UserConfig]:
         enabled_users = [user for user in self.users if user.enabled]

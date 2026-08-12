@@ -29,10 +29,14 @@ For each configured user, per run:
 5. Render the assessment as plain text and email it, and post a Discord
    notification.
 
-A run processes users sequentially and also sends an operational Discord
-notification summarizing success/failure. If a user's menu isn't published
-yet for the target week, that user's LLM/email/delivery steps are skipped and
-a status notification is sent instead of treating it as an error.
+A run fetches every user's menu (step 1) sequentially, one at a time — this
+is deliberate, so a growing number of users never sends concurrent requests
+to the menu provider. Once a user's menu is fetched, the remaining steps
+(2-5) run in parallel across users, bounded by `runtime.max_concurrent_users`
+(default 5). The run also sends an operational Discord notification per user
+summarizing success/failure. If a user's menu isn't published yet for the
+target week, that user's LLM/email/delivery steps are skipped and a status
+notification is sent instead of treating it as an error.
 
 ## Features
 
@@ -70,7 +74,7 @@ a status notification is sent instead of treating it as an error.
 ```
 src/meal_orchestrator/
   cli.py            entrypoint: argument parsing, env var checks
-  orchestrator.py    run-level orchestration: user selection, target week, operational notifications
+  orchestrator.py    run-level orchestration: user selection, target week, sequential menu fetch then bounded-parallel remainder, operational notifications
   workflow.py         per-user workflow: fetch -> normalize -> prompt -> LLM -> email -> Discord
   config/              YAML loading and config dataclasses
   domain/              shared dataclasses (canonical menu, requests/results, workflow status)
@@ -98,8 +102,9 @@ prompts/
 
 Copy the example files and edit them:
 
-- `config/app.example.yaml` — timezone, LLM model/timeout/retries/fallback
-  models, default provider, delivery settings, artifact retention.
+- `config/app.example.yaml` — timezone, max concurrent users, LLM
+  model/timeout/retries/fallback models, default provider, delivery settings,
+  artifact retention.
 - `config/users.example.yaml` — one entry per user: provider, provider
   offering id, email, Discord ids, prompt file, and purchased meals (type +
   size).
@@ -143,6 +148,7 @@ Flags:
 | `--week-start` | Run against a specific week (`YYYY-MM-DD`), instead of the nearest upcoming Monday |
 | `--dry-run` | Run the full pipeline including the LLM call, but skip email/Discord delivery |
 | `--llm-model` | Override the configured OpenRouter model |
+| `--max-concurrent-users` | Override `runtime.max_concurrent_users` for this run |
 | `--log-level` | Log level (default `INFO`) |
 
 Exit code is `0` if every user's workflow completed (including expected
@@ -204,10 +210,15 @@ auto-generated notes.
 
 ## Design principles
 
-- **Single sequential service.** One process, one CLI entrypoint, users
-  processed one after another. Simple to run and reason about; parallelism
-  can be added later around the per-user workflow boundary if it's ever
-  needed.
+- **Sequential menu fetch, bounded-parallel remainder.** One process, one CLI
+  entrypoint. Menu fetching always runs sequentially, one user at a time, to
+  avoid bursting the menu provider as the user count grows. Once a user's
+  menu is fetched, the rest of that user's pipeline (prompt, LLM, email,
+  Discord) runs on a thread pool bounded by `runtime.max_concurrent_users`,
+  independently of other users. Threads (not asyncio) were chosen because the
+  workload is I/O-bound and the codebase has no existing async code — see
+  `UserWorkflowExecutor.fetch_menu`/`execute_from_menu` in `workflow.py` and
+  the two-phase loop in `RunOrchestrator.run`.
 - **Provider-specific normalizers.** Each provider owns its own raw-response
   parsing and canonical transformation rather than sharing a generic parser
   — provider APIs are inconsistent enough that a shared abstraction would be
@@ -233,7 +244,10 @@ auto-generated notes.
 ## Known limitations
 
 - No web UI or database; everything is driven by CLI + YAML config.
-- Only one LLM request per user per run (no batching).
+- Only one LLM request per user per run (no batching). If a future change
+  moves to a batch-submit LLM API with long (up to 24h) wait times, the
+  `max_concurrent_users` sizing philosophy would need revisiting — today it
+  bounds concurrent HTTP round-trips, not concurrent long-lived waits.
 - If any purchased meal is missing for any day in the target week, that
   user's entire run is treated as menu-unavailable — there's no
   partial-week handling.
