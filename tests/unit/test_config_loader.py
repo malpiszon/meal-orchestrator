@@ -10,6 +10,7 @@ def test_load_example_config_files() -> None:
     users = load_users_config(Path("config/users.example.yaml"))
 
     assert app.runtime.timezone == "Europe/Warsaw"
+    assert app.runtime.max_concurrent_users == 5
     assert app.llm.model == "openai/gpt-5-mini"
     assert app.llm.dry_run_model == "google/gemini-2.5-flash-lite"
     assert app.artifacts is not None
@@ -17,6 +18,101 @@ def test_load_example_config_files() -> None:
     assert app.artifacts.max_runs_per_user == 10
     assert users[0].id == "example"
     assert users[0].purchased_meals[0].type == "breakfast"
+
+
+def test_max_concurrent_users_defaults_when_absent(tmp_path) -> None:
+    path = tmp_path / "app.yaml"
+    path.write_text(
+        """
+runtime:
+  timezone: Europe/Warsaw
+llm:
+  provider: openrouter
+  model: test
+  timeout_seconds: 30
+  max_retries: 1
+providers:
+  default: example_provider
+delivery:
+  email_from: test@example.com
+  operational_discord_webhook_env: DISCORD_OPS_WEBHOOK_URL
+""",
+        encoding="utf-8",
+    )
+    app = load_app_config(path)
+    assert app.runtime.max_concurrent_users == 5
+
+
+def test_max_concurrent_users_loaded_when_present(tmp_path) -> None:
+    path = tmp_path / "app.yaml"
+    path.write_text(
+        """
+runtime:
+  timezone: Europe/Warsaw
+  max_concurrent_users: 3
+llm:
+  provider: openrouter
+  model: test
+  timeout_seconds: 30
+  max_retries: 1
+providers:
+  default: example_provider
+delivery:
+  email_from: test@example.com
+  operational_discord_webhook_env: DISCORD_OPS_WEBHOOK_URL
+""",
+        encoding="utf-8",
+    )
+    app = load_app_config(path)
+    assert app.runtime.max_concurrent_users == 3
+
+
+def test_max_concurrent_users_rejects_non_positive_value(tmp_path) -> None:
+    path = tmp_path / "app.yaml"
+    path.write_text(
+        """
+runtime:
+  timezone: Europe/Warsaw
+  max_concurrent_users: 0
+llm:
+  provider: openrouter
+  model: test
+  timeout_seconds: 30
+  max_retries: 1
+providers:
+  default: example_provider
+delivery:
+  email_from: test@example.com
+  operational_discord_webhook_env: DISCORD_OPS_WEBHOOK_URL
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="max_concurrent_users must be a positive integer"):
+        load_app_config(path)
+
+
+def test_max_concurrent_users_rejects_non_integer_value(tmp_path) -> None:
+    path = tmp_path / "app.yaml"
+    path.write_text(
+        """
+runtime:
+  timezone: Europe/Warsaw
+  max_concurrent_users: "five"
+llm:
+  provider: openrouter
+  model: test
+  timeout_seconds: 30
+  max_retries: 1
+providers:
+  default: example_provider
+delivery:
+  email_from: test@example.com
+  operational_discord_webhook_env: DISCORD_OPS_WEBHOOK_URL
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="max_concurrent_users must be a positive integer"):
+        load_app_config(path)
 
 
 def test_artifacts_config_disabled_returns_none(tmp_path) -> None:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+import time
 from dataclasses import replace
 from datetime import date
 
@@ -8,6 +10,7 @@ from meal_orchestrator.domain import LlmResult, ProviderMenuRequest, ProviderRes
 from meal_orchestrator.llm import EmptyLlmResponseError, LlmFailureDetails
 from meal_orchestrator.orchestrator import RunOptions, RunOrchestrator
 from meal_orchestrator.retries import RetryError
+from meal_orchestrator.workflow import UserWorkflowExecutor
 from tests.unit.helpers import (
     FakeDiscordClient,
     FakeEmailClient,
@@ -16,6 +19,36 @@ from tests.unit.helpers import (
     user_config,
     week_assessment,
 )
+
+
+class _ConcurrencyTracker:
+    """Tracks the peak number of overlapping calls to `track()`."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._current = 0
+        self.peak = 0
+
+    def track(self, work) -> None:
+        with self._lock:
+            self._current += 1
+            self.peak = max(self.peak, self._current)
+        try:
+            work()
+        finally:
+            with self._lock:
+                self._current -= 1
+
+
+def _user(tmp_path, user_id: str, *, provider: str = "example_provider"):
+    prompt_file = tmp_path / f"{user_id}.md"
+    prompt_file.write_text(f"Choose meals for {user_id}.", encoding="utf-8")
+    return replace(
+        user_config(prompt_file.relative_to(tmp_path)),
+        id=user_id,
+        email=f"{user_id}@example.com",
+        provider=provider,
+    )
 
 
 class RecordingProvider:
@@ -64,6 +97,21 @@ class FailingLlmClient:
                     },
                 )
             ),
+        )
+
+
+class TrackingLlmClient:
+    """Records peak concurrent `generate()` calls via `tracker`, holding each call
+    open for `delay` seconds so overlapping calls have a chance to be observed."""
+
+    def __init__(self, tracker: _ConcurrencyTracker, *, delay: float = 0.03) -> None:
+        self._tracker = tracker
+        self._delay = delay
+
+    def generate(self, request, **_kwargs):
+        self._tracker.track(lambda: time.sleep(self._delay))
+        return LlmResult(
+            structured=week_assessment(request.payload.menu), model=request.model, attempt=1
         )
 
 
@@ -477,3 +525,244 @@ def test_capability_check_failure_suppresses_ops_notification_on_dry_run(
     orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=True))
 
     assert discord.messages == []
+
+
+def test_menu_fetch_never_overlaps_even_with_a_high_concurrency_limit(tmp_path) -> None:
+    tracker = _ConcurrencyTracker()
+
+    class TrackedProvider:
+        provider_id = "example_provider"
+
+        def get_canonical_week_menu(self, request: ProviderMenuRequest):
+            tracker.track(lambda: time.sleep(0.03))
+            return ProviderResult(menu=canonical_menu())
+
+    users = [_user(tmp_path, f"user{i}") for i in range(4)]
+
+    orchestrator = RunOrchestrator(
+        app_config=app_config(max_concurrent_users=4),
+        users=users,
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: TrackedProvider(),
+        llm_client=FakeLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=FakeDiscordClient(),
+        capability_check=_no_capability_check,
+    )
+
+    results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert all(r.status == WorkflowStatus.COMPLETED for r in results)
+    assert tracker.peak == 1
+
+
+def test_post_menu_steps_genuinely_overlap_across_users(tmp_path) -> None:
+    users = [_user(tmp_path, f"user{i}") for i in range(3)]
+    barrier = threading.Barrier(len(users), timeout=5)
+
+    class BarrierLlmClient:
+        def generate(self, request, **_kwargs):
+            barrier.wait()
+            return LlmResult(
+                structured=week_assessment(request.payload.menu), model=request.model, attempt=1
+            )
+
+    orchestrator = RunOrchestrator(
+        app_config=app_config(max_concurrent_users=len(users)),
+        users=users,
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=BarrierLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=FakeDiscordClient(),
+        capability_check=_no_capability_check,
+    )
+
+    results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    # Every user's LLM call must have reached the barrier concurrently for all
+    # of them to pass it — a sequential loop would deadlock/timeout instead.
+    assert all(r.status == WorkflowStatus.COMPLETED for r in results)
+
+
+def test_phase_a_isolates_menu_outcomes_from_other_users(tmp_path) -> None:
+    users = [
+        _user(tmp_path, "good", provider="provider_ok"),
+        _user(tmp_path, "unavailable", provider="provider_unavailable"),
+        _user(tmp_path, "broken", provider="provider_broken"),
+    ]
+
+    class UnavailableProvider:
+        provider_id = "provider_unavailable"
+
+        def get_canonical_week_menu(self, request: ProviderMenuRequest):
+            return ProviderResult(menu=canonical_menu(complete=False))
+
+    def factory(provider_id: str):
+        if provider_id == "provider_ok":
+            return RecordingProvider()
+        if provider_id == "provider_unavailable":
+            return UnavailableProvider()
+        return FailingProvider()
+
+    orchestrator = RunOrchestrator(
+        app_config=app_config(),
+        users=users,
+        project_root=tmp_path,
+        provider_factory=factory,
+        llm_client=FakeLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=FakeDiscordClient(),
+        capability_check=_no_capability_check,
+    )
+
+    results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    by_id = {r.user_id: r for r in results}
+    assert by_id["good"].status == WorkflowStatus.COMPLETED
+    assert by_id["unavailable"].status == WorkflowStatus.MENU_UNAVAILABLE
+    assert by_id["broken"].status == WorkflowStatus.FAILED
+    assert by_id["broken"].failed_step == "provider"
+
+
+def test_phase_b_respects_configured_concurrency_limit(tmp_path) -> None:
+    tracker = _ConcurrencyTracker()
+
+    users = [_user(tmp_path, f"user{i}") for i in range(6)]
+
+    orchestrator = RunOrchestrator(
+        app_config=app_config(max_concurrent_users=2),
+        users=users,
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=TrackingLlmClient(tracker),
+        email_client=FakeEmailClient(),
+        discord_client=FakeDiscordClient(),
+        capability_check=_no_capability_check,
+    )
+
+    results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert all(r.status == WorkflowStatus.COMPLETED for r in results)
+    assert tracker.peak == 2
+
+
+def test_results_preserve_selected_users_order_regardless_of_completion_order(tmp_path) -> None:
+    users = [_user(tmp_path, "first"), _user(tmp_path, "second"), _user(tmp_path, "third")]
+
+    class DelayedByPromptLlmClient:
+        _delays = {"first": 0.15, "second": 0.0, "third": 0.0}
+
+        def generate(self, request, **_kwargs):
+            for marker, delay in self._delays.items():
+                if marker in request.payload.user_prompt:
+                    time.sleep(delay)
+                    break
+            return LlmResult(
+                structured=week_assessment(request.payload.menu), model=request.model, attempt=1
+            )
+
+    orchestrator = RunOrchestrator(
+        app_config=app_config(max_concurrent_users=3),
+        users=users,
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=DelayedByPromptLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=FakeDiscordClient(),
+        capability_check=_no_capability_check,
+    )
+
+    results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert [r.user_id for r in results] == ["first", "second", "third"]
+    assert all(r.status == WorkflowStatus.COMPLETED for r in results)
+
+
+def test_run_options_max_concurrent_users_overrides_config_default(tmp_path) -> None:
+    tracker = _ConcurrencyTracker()
+
+    users = [_user(tmp_path, f"user{i}") for i in range(4)]
+
+    orchestrator = RunOrchestrator(
+        app_config=app_config(max_concurrent_users=4),
+        users=users,
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=TrackingLlmClient(tracker),
+        email_client=FakeEmailClient(),
+        discord_client=FakeDiscordClient(),
+        capability_check=_no_capability_check,
+    )
+
+    results = orchestrator.run(
+        RunOptions(week_start=date(2026, 6, 1), dry_run=False, max_concurrent_users=1)
+    )
+
+    assert all(r.status == WorkflowStatus.COMPLETED for r in results)
+    assert tracker.peak == 1
+
+
+def test_non_positive_max_concurrent_users_override_falls_back_to_config(tmp_path) -> None:
+    """A malformed override (0, negative) must not crash ThreadPoolExecutor construction.
+
+    It should be treated as "no override" and fall back to the configured value,
+    rather than propagating an unhandled ValueError out of run().
+    """
+    tracker = _ConcurrencyTracker()
+    users = [_user(tmp_path, f"user{i}") for i in range(6)]
+
+    for invalid_override in (0, -1):
+        tracker.peak = 0
+        orchestrator = RunOrchestrator(
+            app_config=app_config(max_concurrent_users=2),
+            users=users,
+            project_root=tmp_path,
+            provider_factory=lambda provider_id: RecordingProvider(),
+            llm_client=TrackingLlmClient(tracker),
+            email_client=FakeEmailClient(),
+            discord_client=FakeDiscordClient(),
+            capability_check=_no_capability_check,
+        )
+
+        results = orchestrator.run(
+            RunOptions(
+                week_start=date(2026, 6, 1), dry_run=False, max_concurrent_users=invalid_override
+            )
+        )
+
+        assert all(r.status == WorkflowStatus.COMPLETED for r in results)
+        assert tracker.peak == 2
+
+
+def test_phase_b_worker_exception_outside_own_handling_is_isolated(tmp_path, monkeypatch) -> None:
+    """A bug that raises out of execute_from_menu itself — bypassing its own internal
+    try/except — must still degrade to a per-user FAILED result labeled failed_step
+    "worker" (distinct from the Phase A "setup" failure label), not crash the run.
+    """
+
+    def _broken_execute_from_menu(self, *args, **kwargs):
+        raise RuntimeError("worker exploded outside its own try/except")
+
+    monkeypatch.setattr(UserWorkflowExecutor, "execute_from_menu", _broken_execute_from_menu)
+
+    users = [_user(tmp_path, "alice"), _user(tmp_path, "bob")]
+
+    orchestrator = RunOrchestrator(
+        app_config=app_config(),
+        users=users,
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=FakeLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=FakeDiscordClient(),
+        capability_check=_no_capability_check,
+    )
+
+    results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert len(results) == 2
+    for result in results:
+        assert result.status == WorkflowStatus.FAILED
+        assert result.failed_step == "worker"
+        assert "worker exploded" in result.detail

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -93,6 +94,23 @@ class _WorkflowState:
     llm_attempts_summary: _LlmAttemptsSummary | None = None
 
 
+@dataclass
+class _MenuFetchOutcome:
+    """Result of the sequential menu-fetch phase.
+
+    If `result` is set, the user's workflow is already finished (fetch failed,
+    or the menu isn't available yet) and no further work is needed. Otherwise
+    `menu`/`artifacts`/`state`/`log_context` carry what the parallel remainder
+    of the pipeline (`execute_from_menu`) needs to continue.
+    """
+
+    result: WorkflowResult | None = None
+    menu: CanonicalMenu | None = None
+    artifacts: RunArtifacts | None = None
+    state: _WorkflowState | None = None
+    log_context: dict | None = None
+
+
 class UserWorkflowExecutor:
     def __init__(
         self,
@@ -114,11 +132,36 @@ class UserWorkflowExecutor:
         self.artifact_store = artifact_store or ArtifactStore()
 
     def execute(self, user: UserConfig, run_context: RunContext) -> WorkflowResult:
+        """Run the full per-user pipeline synchronously (menu fetch included).
+
+        Convenience wrapper around `fetch_menu` + `execute_from_menu` for
+        single-call/sequential use. Callers that need menu fetching to happen
+        outside a parallel region (e.g. the orchestrator's two-phase run)
+        should call `fetch_menu` and `execute_from_menu` separately instead.
+        """
+        outcome = self.fetch_menu(user, run_context)
+        if outcome.result is not None:
+            return outcome.result
+        return self.execute_from_menu(
+            user,
+            run_context,
+            outcome.menu,
+            outcome.artifacts,
+            outcome.state,
+            outcome.log_context,
+        )
+
+    def fetch_menu(self, user: UserConfig, run_context: RunContext) -> _MenuFetchOutcome:
+        """Run the menu-fetch step. Intended to be called sequentially per user —
+        never from a worker thread — since concurrent requests to the menu
+        provider risk looking like a burst/DOS as the number of users grows.
+        """
         log_context = {
             "run_id": run_context.run_id,
             "user_id": user.id,
             "provider": run_context.provider_id,
             "week_start": run_context.week_start.isoformat(),
+            "worker": threading.current_thread().name,
         }
         artifacts = self.artifact_store.for_run(run_context.run_id, user.id)
         state = _WorkflowState(started_at=datetime.now(UTC))
@@ -126,7 +169,56 @@ class UserWorkflowExecutor:
         logger.info("user workflow started", extra={**log_context, "step": "start"})
         try:
             menu = self._fetch_menu(user, run_context, artifacts, log_context)
+            return _MenuFetchOutcome(
+                menu=menu, artifacts=artifacts, state=state, log_context=log_context
+            )
+        except ProviderNormalizationError as exc:
+            if exc.raw_response is not None:
+                artifacts.save_provider_raw(exc.raw_response)
+            state.error = str(exc)
+            logger.error(
+                "provider normalization failed",
+                exc_info=True,
+                extra={**log_context, "step": "provider", "error": state.error},
+            )
+            result = WorkflowResult(
+                user_id=user.id,
+                status=WorkflowStatus.FAILED,
+                detail=state.error,
+                failed_step=state.failed_step,
+            )
+        except MenuUnavailableError as exc:
+            if exc.raw_response is not None:
+                artifacts.save_provider_raw(exc.raw_response)
+            state.error = str(exc)
+            logger.info("menu unavailable", extra={**log_context, "step": "provider"})
+            state.status = WorkflowStatus.MENU_UNAVAILABLE
+            self._notify_menu_unavailable(user, run_context, log_context)
+            result = WorkflowResult(
+                user_id=user.id,
+                status=WorkflowStatus.MENU_UNAVAILABLE,
+                detail=state.error,
+            )
+        except Exception as exc:
+            result = self._generic_failure_result(user, state, log_context, exc)
+        self._save_metadata(artifacts, user, run_context, state)
+        return _MenuFetchOutcome(result=result)
 
+    def execute_from_menu(
+        self,
+        user: UserConfig,
+        run_context: RunContext,
+        menu: CanonicalMenu,
+        artifacts: RunArtifacts,
+        state: _WorkflowState,
+        log_context: dict,
+    ) -> WorkflowResult:
+        """Run prompt build -> LLM -> email -> Discord notify for an already-fetched
+        menu. Safe to call concurrently across users — this is the unit of work
+        submitted to the orchestrator's thread pool.
+        """
+        log_context = {**log_context, "worker": threading.current_thread().name}
+        try:
             state.failed_step = "prompt"
             llm_request = self._build_llm_request(user, run_context, menu, log_context)
             artifacts.save_llm_request(llm_request)
@@ -151,51 +243,30 @@ class UserWorkflowExecutor:
                 retry_count=retry_count,
                 model=llm_result.model,
             )
-        except ProviderNormalizationError as exc:
-            if exc.raw_response is not None:
-                artifacts.save_provider_raw(exc.raw_response)
-            state.error = str(exc)
-            logger.error(
-                "provider normalization failed",
-                exc_info=True,
-                extra={**log_context, "step": "provider", "error": state.error},
-            )
-            return WorkflowResult(
-                user_id=user.id,
-                status=WorkflowStatus.FAILED,
-                detail=state.error,
-                failed_step=state.failed_step,
-            )
-        except MenuUnavailableError as exc:
-            if exc.raw_response is not None:
-                artifacts.save_provider_raw(exc.raw_response)
-            state.error = str(exc)
-            logger.info("menu unavailable", extra={**log_context, "step": "provider"})
-            state.status = WorkflowStatus.MENU_UNAVAILABLE
-            self._notify_menu_unavailable(user, run_context, log_context)
-            return WorkflowResult(
-                user_id=user.id,
-                status=WorkflowStatus.MENU_UNAVAILABLE,
-                detail=state.error,
-            )
         except Exception as exc:
-            state.error = str(exc)
-            state.llm_failure = _llm_failure_details(exc)
-            logger.error(
-                "user workflow failed",
-                exc_info=True,
-                extra={**log_context, "step": "failed", "error": state.error},
-            )
-            retry_count = state.llm_failure.attempt - 1 if state.llm_failure is not None else None
-            return WorkflowResult(
-                user_id=user.id,
-                status=WorkflowStatus.FAILED,
-                detail=state.error,
-                failed_step=state.failed_step,
-                retry_count=retry_count,
-            )
+            return self._generic_failure_result(user, state, log_context, exc)
         finally:
             self._save_metadata(artifacts, user, run_context, state)
+
+    def _generic_failure_result(
+        self, user: UserConfig, state: _WorkflowState, log_context: dict, exc: Exception
+    ) -> WorkflowResult:
+        """Build the FAILED result for any exception not specifically handled above."""
+        state.error = str(exc)
+        state.llm_failure = _llm_failure_details(exc)
+        logger.error(
+            "user workflow failed",
+            exc_info=True,
+            extra={**log_context, "step": "failed", "error": state.error},
+        )
+        retry_count = state.llm_failure.attempt - 1 if state.llm_failure is not None else None
+        return WorkflowResult(
+            user_id=user.id,
+            status=WorkflowStatus.FAILED,
+            detail=state.error,
+            failed_step=state.failed_step,
+            retry_count=retry_count,
+        )
 
     def _fetch_menu(
         self,

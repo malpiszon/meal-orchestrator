@@ -21,9 +21,13 @@ from meal_orchestrator.domain import (
 )
 
 
-def app_config(*, fallback_models: list[str] | None = None) -> AppConfig:
+def app_config(
+    *, fallback_models: list[str] | None = None, max_concurrent_users: int = 5
+) -> AppConfig:
     return AppConfig(
-        runtime=RuntimeConfig(timezone="Europe/Warsaw"),
+        runtime=RuntimeConfig(
+            timezone="Europe/Warsaw", max_concurrent_users=max_concurrent_users
+        ),
         llm=LlmConfig(
             provider="openrouter",
             model="test-model",
