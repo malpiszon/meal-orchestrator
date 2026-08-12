@@ -200,21 +200,7 @@ class UserWorkflowExecutor:
                 detail=state.error,
             )
         except Exception as exc:
-            state.error = str(exc)
-            state.llm_failure = _llm_failure_details(exc)
-            logger.error(
-                "user workflow failed",
-                exc_info=True,
-                extra={**log_context, "step": "failed", "error": state.error},
-            )
-            retry_count = state.llm_failure.attempt - 1 if state.llm_failure is not None else None
-            result = WorkflowResult(
-                user_id=user.id,
-                status=WorkflowStatus.FAILED,
-                detail=state.error,
-                failed_step=state.failed_step,
-                retry_count=retry_count,
-            )
+            result = self._generic_failure_result(user, state, log_context, exc)
         self._save_metadata(artifacts, user, run_context, state)
         return _MenuFetchOutcome(result=result)
 
@@ -258,23 +244,29 @@ class UserWorkflowExecutor:
                 model=llm_result.model,
             )
         except Exception as exc:
-            state.error = str(exc)
-            state.llm_failure = _llm_failure_details(exc)
-            logger.error(
-                "user workflow failed",
-                exc_info=True,
-                extra={**log_context, "step": "failed", "error": state.error},
-            )
-            retry_count = state.llm_failure.attempt - 1 if state.llm_failure is not None else None
-            return WorkflowResult(
-                user_id=user.id,
-                status=WorkflowStatus.FAILED,
-                detail=state.error,
-                failed_step=state.failed_step,
-                retry_count=retry_count,
-            )
+            return self._generic_failure_result(user, state, log_context, exc)
         finally:
             self._save_metadata(artifacts, user, run_context, state)
+
+    def _generic_failure_result(
+        self, user: UserConfig, state: _WorkflowState, log_context: dict, exc: Exception
+    ) -> WorkflowResult:
+        """Build the FAILED result for any exception not specifically handled above."""
+        state.error = str(exc)
+        state.llm_failure = _llm_failure_details(exc)
+        logger.error(
+            "user workflow failed",
+            exc_info=True,
+            extra={**log_context, "step": "failed", "error": state.error},
+        )
+        retry_count = state.llm_failure.attempt - 1 if state.llm_failure is not None else None
+        return WorkflowResult(
+            user_id=user.id,
+            status=WorkflowStatus.FAILED,
+            detail=state.error,
+            failed_step=state.failed_step,
+            retry_count=retry_count,
+        )
 
     def _fetch_menu(
         self,

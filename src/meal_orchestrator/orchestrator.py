@@ -7,7 +7,7 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Protocol
+from typing import NamedTuple, Protocol
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -43,6 +43,26 @@ class RunOptions:
     dry_run: bool = False
     llm_model: str | None = None
     max_concurrent_users: int | None = None
+
+
+class _RunClients(NamedTuple):
+    """Clients/collaborators shared across every user processed in a run."""
+
+    email_client: EmailClient | None
+    llm_client: OpenRouterClient
+    discord_client: DiscordClient
+    provider_factory: Callable[[str], ProviderAdapter]
+    artifact_store: ArtifactStore
+
+
+class _PendingUser(NamedTuple):
+    """A user whose menu was fetched successfully and is awaiting Phase B."""
+
+    executor: UserWorkflowExecutor
+    user: UserConfig
+    run_context: RunContext
+    # workflow._MenuFetchOutcome — private, not imported here.
+    outcome: object
 
 
 class RunOrchestrator:
@@ -88,9 +108,45 @@ class RunOrchestrator:
         )
 
         discord_client = self.discord_client_override or build_discord_client()
-
-        capability_check = self.capability_check_override or assert_structured_output_supported
         model = self._resolve_model(options)
+
+        capability_failures = self._run_capability_check(
+            model, discord_client, run_id, options, selected_users
+        )
+        if capability_failures is not None:
+            return capability_failures
+
+        clients = self._build_shared_clients(discord_client, run_id)
+        notify_ops = self._build_ops_notifier(discord_client, model, run_id, options)
+
+        results_by_user_id, pending = self._fetch_menus_sequentially(
+            selected_users, options, run_id, week_start, week_end, clients, notify_ops
+        )
+        results_by_user_id.update(
+            self._process_pending_in_parallel(pending, max_concurrent_users, run_id, notify_ops)
+        )
+        results = [results_by_user_id[user.id] for user in selected_users]
+
+        logger.info(
+            "run completed",
+            extra={"run_id": run_id, "week_start": week_start.isoformat(), "step": "complete"},
+        )
+        return results
+
+    def _run_capability_check(
+        self,
+        model: str,
+        discord_client: DiscordClient,
+        run_id: str,
+        options: RunOptions,
+        selected_users: list[UserConfig],
+    ) -> list[WorkflowResult] | None:
+        """Verify the model supports structured outputs before any user is processed.
+
+        Returns a synthetic FAILED result per user (aborting the whole run) if the
+        check fails, or None if it passed and processing should continue.
+        """
+        capability_check = self.capability_check_override or assert_structured_output_supported
         try:
             capability_check(model, fallback_models=self.app_config.llm.fallback_models)
         except Exception as exc:
@@ -118,7 +174,10 @@ class RunOrchestrator:
                 )
                 for user in selected_users
             ]
+        return None
 
+    def _build_shared_clients(self, discord_client: DiscordClient, run_id: str) -> _RunClients:
+        """Construct (or reuse overridden) clients shared across every user this run."""
         if self.email_client_override is not None:
             email_client = self.email_client_override
         else:
@@ -132,10 +191,21 @@ class RunOrchestrator:
             artifact_store.cleanup()
         except Exception:
             logger.warning("artifact cleanup failed", exc_info=True, extra={"run_id": run_id})
+        return _RunClients(
+            email_client=email_client,
+            llm_client=llm_client,
+            discord_client=discord_client,
+            provider_factory=provider_factory,
+            artifact_store=artifact_store,
+        )
 
+    def _build_ops_notifier(
+        self, discord_client: DiscordClient, model: str, run_id: str, options: RunOptions
+    ) -> Callable[[str, WorkflowResult], None]:
+        """Build a per-user callback that sends the operational Discord notification."""
         ops_webhook = self.app_config.delivery.operational_discord_webhook_env
 
-        def _send_ops_notification_for(user_id: str, result: WorkflowResult) -> None:
+        def _notify(user_id: str, result: WorkflowResult) -> None:
             if options.dry_run or not ops_webhook:
                 return
             if os.environ.get(ops_webhook):
@@ -158,13 +228,26 @@ class RunOrchestrator:
                     },
                 )
 
-        results_by_user_id: dict[str, WorkflowResult] = {}
-        # Outcome element is a workflow._MenuFetchOutcome (private, not imported here).
-        pending: dict[str, tuple[UserWorkflowExecutor, UserConfig, RunContext, object]] = {}
+        return _notify
 
-        # Phase A: sequential menu fetch for every user. Never parallelized —
-        # concurrent requests to the menu provider risk looking like a
-        # burst/DOS as the number of users grows.
+    def _fetch_menus_sequentially(
+        self,
+        selected_users: list[UserConfig],
+        options: RunOptions,
+        run_id: str,
+        week_start: date,
+        week_end: date,
+        clients: _RunClients,
+        notify_ops: Callable[[str, WorkflowResult], None],
+    ) -> tuple[dict[str, WorkflowResult], dict[str, _PendingUser]]:
+        """Fetch every user's menu one at a time.
+
+        Never parallelized — concurrent requests to the menu provider risk
+        looking like a burst/DOS as the number of users grows.
+        """
+        results_by_user_id: dict[str, WorkflowResult] = {}
+        pending: dict[str, _PendingUser] = {}
+
         for user in selected_users:
             provider_id = (
                 options.provider_override or user.provider or self.app_config.default_provider
@@ -178,15 +261,15 @@ class RunOrchestrator:
                 llm_model=options.llm_model,
             )
             try:
-                provider = provider_factory(provider_id)
+                provider = clients.provider_factory(provider_id)
                 executor = UserWorkflowExecutor(
                     app_config=self.app_config,
                     provider=provider,
-                    llm_client=llm_client,
-                    email_client=email_client,
-                    discord_client=discord_client,
+                    llm_client=clients.llm_client,
+                    email_client=clients.email_client,
+                    discord_client=clients.discord_client,
                     project_root=self.project_root,
-                    artifact_store=artifact_store,
+                    artifact_store=clients.artifact_store,
                 )
                 outcome = executor.fetch_menu(user, run_context)
             except Exception as exc:
@@ -207,64 +290,65 @@ class RunOrchestrator:
                     failed_step="setup",
                 )
                 results_by_user_id[user.id] = result
-                _send_ops_notification_for(user.id, result)
+                notify_ops(user.id, result)
                 continue
 
             if outcome.result is not None:
                 results_by_user_id[user.id] = outcome.result
-                _send_ops_notification_for(user.id, outcome.result)
+                notify_ops(user.id, outcome.result)
             else:
-                pending[user.id] = (executor, user, run_context, outcome)
+                pending[user.id] = _PendingUser(executor, user, run_context, outcome)
 
-        # Phase B: bounded-parallel remainder (prompt -> LLM -> email -> Discord)
-        # for every user whose menu was fetched successfully.
-        if pending:
-            max_workers = min(len(pending), max_concurrent_users)
-            with ThreadPoolExecutor(
-                max_workers=max_workers, thread_name_prefix="user-worker"
-            ) as pool:
-                future_to_user_id: dict[Future[WorkflowResult], str] = {
-                    pool.submit(
-                        pending_executor.execute_from_menu,
-                        pending_user,
-                        pending_run_context,
-                        pending_outcome.menu,
-                        pending_outcome.artifacts,
-                        pending_outcome.state,
-                        pending_outcome.log_context,
-                    ): user_id
-                    for user_id, (
-                        pending_executor,
-                        pending_user,
-                        pending_run_context,
-                        pending_outcome,
-                    ) in pending.items()
-                }
-                for future in as_completed(future_to_user_id):
-                    user_id = future_to_user_id[future]
-                    try:
-                        result = future.result()
-                    except Exception as exc:
-                        logger.exception(
-                            "user workflow worker failed unexpectedly",
-                            extra={"run_id": run_id, "user_id": user_id, "step": "failed"},
-                        )
-                        result = WorkflowResult(
-                            user_id=user_id,
-                            status=WorkflowStatus.FAILED,
-                            detail=str(exc),
-                            failed_step="worker",
-                        )
-                    results_by_user_id[user_id] = result
-                    _send_ops_notification_for(user_id, result)
+        return results_by_user_id, pending
 
-        results = [results_by_user_id[user.id] for user in selected_users]
+    def _process_pending_in_parallel(
+        self,
+        pending: dict[str, _PendingUser],
+        max_concurrent_users: int,
+        run_id: str,
+        notify_ops: Callable[[str, WorkflowResult], None],
+    ) -> dict[str, WorkflowResult]:
+        """Run prompt -> LLM -> email -> Discord for every user whose menu was
+        fetched successfully, bounded by max_concurrent_users.
+        """
+        results_by_user_id: dict[str, WorkflowResult] = {}
+        if not pending:
+            return results_by_user_id
 
-        logger.info(
-            "run completed",
-            extra={"run_id": run_id, "week_start": week_start.isoformat(), "step": "complete"},
-        )
-        return results
+        max_workers = min(len(pending), max_concurrent_users)
+        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="user-worker") as pool:
+            future_to_user_id: dict[Future[WorkflowResult], str] = {}
+            for user_id, pending_user in pending.items():
+                future = pool.submit(
+                    pending_user.executor.execute_from_menu,
+                    pending_user.user,
+                    pending_user.run_context,
+                    pending_user.outcome.menu,
+                    pending_user.outcome.artifacts,
+                    pending_user.outcome.state,
+                    pending_user.outcome.log_context,
+                )
+                future_to_user_id[future] = user_id
+
+            for future in as_completed(future_to_user_id):
+                user_id = future_to_user_id[future]
+                try:
+                    result = future.result()
+                except Exception as exc:
+                    logger.exception(
+                        "user workflow worker failed unexpectedly",
+                        extra={"run_id": run_id, "user_id": user_id, "step": "failed"},
+                    )
+                    result = WorkflowResult(
+                        user_id=user_id,
+                        status=WorkflowStatus.FAILED,
+                        detail=str(exc),
+                        failed_step="worker",
+                    )
+                results_by_user_id[user_id] = result
+                notify_ops(user_id, result)
+
+        return results_by_user_id
 
     def _resolve_model(self, options: RunOptions) -> str:
         default_model = self.app_config.llm.model

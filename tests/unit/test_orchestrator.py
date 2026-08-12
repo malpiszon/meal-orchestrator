@@ -100,6 +100,21 @@ class FailingLlmClient:
         )
 
 
+class TrackingLlmClient:
+    """Records peak concurrent `generate()` calls via `tracker`, holding each call
+    open for `delay` seconds so overlapping calls have a chance to be observed."""
+
+    def __init__(self, tracker: _ConcurrencyTracker, *, delay: float = 0.03) -> None:
+        self._tracker = tracker
+        self._delay = delay
+
+    def generate(self, request, **_kwargs):
+        self._tracker.track(lambda: time.sleep(self._delay))
+        return LlmResult(
+            structured=week_assessment(request.payload.menu), model=request.model, attempt=1
+        )
+
+
 def _no_capability_check(model: str, **_kwargs) -> None:
     pass
 
@@ -613,13 +628,6 @@ def test_phase_a_isolates_menu_outcomes_from_other_users(tmp_path) -> None:
 def test_phase_b_respects_configured_concurrency_limit(tmp_path) -> None:
     tracker = _ConcurrencyTracker()
 
-    class TrackingLlmClient:
-        def generate(self, request, **_kwargs):
-            tracker.track(lambda: time.sleep(0.03))
-            return LlmResult(
-                structured=week_assessment(request.payload.menu), model=request.model, attempt=1
-            )
-
     users = [_user(tmp_path, f"user{i}") for i in range(6)]
 
     orchestrator = RunOrchestrator(
@@ -627,7 +635,7 @@ def test_phase_b_respects_configured_concurrency_limit(tmp_path) -> None:
         users=users,
         project_root=tmp_path,
         provider_factory=lambda provider_id: RecordingProvider(),
-        llm_client=TrackingLlmClient(),
+        llm_client=TrackingLlmClient(tracker),
         email_client=FakeEmailClient(),
         discord_client=FakeDiscordClient(),
         capability_check=_no_capability_check,
@@ -674,13 +682,6 @@ def test_results_preserve_selected_users_order_regardless_of_completion_order(tm
 def test_run_options_max_concurrent_users_overrides_config_default(tmp_path) -> None:
     tracker = _ConcurrencyTracker()
 
-    class TrackingLlmClient:
-        def generate(self, request, **_kwargs):
-            tracker.track(lambda: time.sleep(0.03))
-            return LlmResult(
-                structured=week_assessment(request.payload.menu), model=request.model, attempt=1
-            )
-
     users = [_user(tmp_path, f"user{i}") for i in range(4)]
 
     orchestrator = RunOrchestrator(
@@ -688,7 +689,7 @@ def test_run_options_max_concurrent_users_overrides_config_default(tmp_path) -> 
         users=users,
         project_root=tmp_path,
         provider_factory=lambda provider_id: RecordingProvider(),
-        llm_client=TrackingLlmClient(),
+        llm_client=TrackingLlmClient(tracker),
         email_client=FakeEmailClient(),
         discord_client=FakeDiscordClient(),
         capability_check=_no_capability_check,
@@ -709,14 +710,6 @@ def test_non_positive_max_concurrent_users_override_falls_back_to_config(tmp_pat
     rather than propagating an unhandled ValueError out of run().
     """
     tracker = _ConcurrencyTracker()
-
-    class TrackingLlmClient:
-        def generate(self, request, **_kwargs):
-            tracker.track(lambda: time.sleep(0.03))
-            return LlmResult(
-                structured=week_assessment(request.payload.menu), model=request.model, attempt=1
-            )
-
     users = [_user(tmp_path, f"user{i}") for i in range(6)]
 
     for invalid_override in (0, -1):
@@ -726,7 +719,7 @@ def test_non_positive_max_concurrent_users_override_falls_back_to_config(tmp_pat
             users=users,
             project_root=tmp_path,
             provider_factory=lambda provider_id: RecordingProvider(),
-            llm_client=TrackingLlmClient(),
+            llm_client=TrackingLlmClient(tracker),
             email_client=FakeEmailClient(),
             discord_client=FakeDiscordClient(),
             capability_check=_no_capability_check,
