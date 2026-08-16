@@ -525,3 +525,20 @@ def test_batch_config_rejects_non_positive_max_wait_hours(tmp_path) -> None:
 
     with pytest.raises(ConfigError, match="max_wait_hours"):
         load_app_config(path)
+
+
+def test_batch_config_rejects_initial_poll_interval_above_max(tmp_path) -> None:
+    path = tmp_path / "app.yaml"
+    path.write_text(
+        _base_app_yaml(
+            """  batch:
+    enabled: true
+    initial_poll_interval_seconds: 7200
+    max_poll_interval_seconds: 3600
+"""
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="initial_poll_interval_seconds"):
+        load_app_config(path)

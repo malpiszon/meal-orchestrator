@@ -50,9 +50,24 @@ def state_file_path(project_root: Path) -> Path:
 
 
 def save_state(project_root: Path, state: PendingBatchState) -> None:
+    """Persist `state`, best-effort.
+
+    A failure here (e.g. a read-only project root) must not crash the run —
+    it only means a crash during the wait loop won't be resumable, which is
+    strictly worse than not persisting but still far better than the whole
+    run failing outright.
+    """
     path = state_file_path(project_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(asdict(state), indent=2), encoding="utf-8")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(asdict(state), indent=2), encoding="utf-8")
+    except OSError:
+        logger.warning(
+            "pending batch state could not be persisted at %s — a crash during this "
+            "batch's wait would not be resumable",
+            path,
+            exc_info=True,
+        )
 
 
 def load_state(project_root: Path) -> PendingBatchState | None:
@@ -83,20 +98,32 @@ def clear_state(project_root: Path) -> None:
 
 def acquire_lock(project_root: Path) -> bool:
     """Best-effort guard against two invocations both running a blocking batch
-    wait at once. Returns False if another live process already holds the lock.
+    wait at once. Returns False if another live process already holds the
+    lock, or if the lock can't be acquired at all (e.g. a read-only project
+    root) — either way, callers treat False as "can't do the durable/
+    coordinated thing right now" and fall back accordingly.
     """
     lock_path = _state_dir(project_root) / _LOCK_FILE_NAME
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    if lock_path.exists():
-        try:
-            pid = int(lock_path.read_text(encoding="utf-8").strip())
-            os.kill(pid, 0)
-        except (ValueError, ProcessLookupError, PermissionError, OSError):
-            pass
-        else:
-            return False
-    lock_path.write_text(str(os.getpid()), encoding="utf-8")
-    return True
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        if lock_path.exists():
+            try:
+                pid = int(lock_path.read_text(encoding="utf-8").strip())
+                os.kill(pid, 0)
+            except (ValueError, ProcessLookupError, PermissionError, OSError):
+                pass
+            else:
+                return False
+        lock_path.write_text(str(os.getpid()), encoding="utf-8")
+        return True
+    except OSError:
+        logger.warning(
+            "batch run lock could not be acquired at %s due to a filesystem error — "
+            "treating as unavailable",
+            lock_path,
+            exc_info=True,
+        )
+        return False
 
 
 def release_lock(project_root: Path) -> None:
@@ -121,7 +148,9 @@ def poll_until_terminal(
     long.
     """
     deadline = (started_at or datetime.now(UTC)).timestamp() + config.max_wait_hours * 3600
-    interval = config.initial_poll_interval_seconds
+    # Clamped defensively in case initial > max (loader.py validates this too, but
+    # a caller could construct BatchConfig directly without going through it).
+    interval = min(config.initial_poll_interval_seconds, config.max_poll_interval_seconds)
     while True:
         data = get_batch(batch_id)
         if not is_pending(data):

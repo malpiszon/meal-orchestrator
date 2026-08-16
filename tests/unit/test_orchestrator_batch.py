@@ -107,9 +107,13 @@ def test_batch_mode_submits_polls_and_delivers(tmp_path, monkeypatch) -> None:
     assert not (tmp_path / ".batch_state" / "run.lock").exists()
 
 
-def test_batch_mode_reports_per_row_failure_without_failing_whole_batch(
+def test_batch_mode_retries_row_failures_synchronously_with_fallback_models(
     tmp_path, monkeypatch
 ) -> None:
+    """A failed/missing batch row must get the same resilience a sync-mode call
+    would — retried synchronously, including trying configured fallback_models —
+    rather than being marked permanently FAILED with no second chance.
+    """
     users = [_user(tmp_path, "alan"), _user(tmp_path, "bob")]
 
     def fake_submit_batch(rows, **_kwargs):
@@ -121,25 +125,40 @@ def test_batch_mode_reports_per_row_failure_without_failing_whole_batch(
     monkeypatch.setattr("meal_orchestrator.orchestrator.submit_batch", fake_submit_batch)
     monkeypatch.setattr("meal_orchestrator.orchestrator.get_batch", fake_get_batch)
 
-    class UnusedLlmClient:
-        def generate(self, request, **_kwargs):
-            raise AssertionError("per-row batch failures must not fall back to synchronous")
+    class FallbackOnlyLlmClient:
+        """Only succeeds when called with the configured fallback model — proves
+        the synchronous retry path (which tries fallback_models) is actually
+        used for a batch row failure, not a bare permanent-FAILED synthesis."""
 
+        def generate(self, request, **_kwargs):
+            candidates = [request.model, *request.fallback_models]
+            if "fallback-model" not in candidates:
+                raise AssertionError("fallback_models were dropped for the batch retry path")
+            return LlmResult(
+                structured=week_assessment(request.payload.menu),
+                model="fallback-model",
+                attempt=2,
+            )
+
+    email_client = FakeEmailClient()
     orchestrator = RunOrchestrator(
-        app_config=_batch_app_config(),
+        app_config=app_config(
+            fallback_models=["fallback-model"], batch=BatchConfig(enabled=True)
+        ),
         users=users,
         project_root=tmp_path,
         provider_factory=lambda provider_id: RecordingProvider(),
-        llm_client=UnusedLlmClient(),
-        email_client=FakeEmailClient(),
+        llm_client=FallbackOnlyLlmClient(),
+        email_client=email_client,
         discord_client=FakeDiscordClient(),
         capability_check=_no_capability_check,
     )
 
     results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
 
-    assert all(r.status == WorkflowStatus.FAILED for r in results)
-    assert all(r.detail == "missing_from_batch" for r in results)
+    assert all(r.status == WorkflowStatus.COMPLETED for r in results)
+    assert all(r.model == "fallback-model" for r in results)
+    assert len(email_client.messages) == 2
 
 
 def test_batch_mode_falls_back_to_sync_when_batch_times_out(tmp_path, monkeypatch) -> None:
@@ -284,5 +303,108 @@ def test_batch_mode_skipped_for_dry_run(tmp_path, monkeypatch) -> None:
     )
 
     results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=True))
+
+    assert results[0].status == WorkflowStatus.COMPLETED
+
+
+def test_batch_submission_falls_back_to_sync_when_lock_already_held(tmp_path) -> None:
+    from meal_orchestrator.batch_runner import acquire_lock
+
+    users = [_user(tmp_path, "alan")]
+    assert acquire_lock(tmp_path) is True  # simulate another invocation already running
+
+    class SyncLlmClient:
+        def generate(self, request, **_kwargs):
+            return LlmResult(
+                structured=week_assessment(request.payload.menu), model=request.model, attempt=1
+            )
+
+    orchestrator = RunOrchestrator(
+        app_config=_batch_app_config(),
+        users=users,
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=SyncLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=FakeDiscordClient(),
+        capability_check=_no_capability_check,
+    )
+
+    results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert results[0].status == WorkflowStatus.COMPLETED
+
+
+def test_batch_resume_reports_failure_not_empty_success_when_lock_held(tmp_path) -> None:
+    """A resume that can't acquire the lock must surface as a FAILED result
+    (and a non-zero-looking outcome), not an empty list that a caller like
+    cli.py's `any(status == FAILED for r in results)` would read as success.
+    """
+    from meal_orchestrator.batch_runner import acquire_lock
+
+    save_state(
+        tmp_path,
+        PendingBatchState(
+            run_id="run-locked",
+            batch_id="batch-locked",
+            submitted_at="2026-06-01T00:00:00+00:00",
+            week_start="2026-06-01",
+            week_end="2026-06-05",
+            model="test-model",
+            users=[PendingBatchUser(user_id="alan", custom_id="run-locked:alan")],
+        ),
+    )
+    assert acquire_lock(tmp_path) is True  # simulate another invocation already running
+
+    class UnusedLlmClient:
+        def generate(self, request, **_kwargs):
+            raise AssertionError("must not process anything while locked")
+
+    orchestrator = RunOrchestrator(
+        app_config=_batch_app_config(),
+        users=[_user(tmp_path, "alan")],
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=UnusedLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=FakeDiscordClient(),
+        capability_check=_no_capability_check,
+    )
+
+    results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert len(results) == 1
+    assert results[0].status == WorkflowStatus.FAILED
+    assert "lock" in results[0].detail
+    assert any(r.status == WorkflowStatus.FAILED for r in results)
+
+
+def test_batch_submission_degrades_to_sync_when_state_dir_unwritable(tmp_path) -> None:
+    """If .batch_state can't be created (e.g. read-only project root), the run
+    must fall back to synchronous processing instead of crashing outright.
+    """
+    users = [_user(tmp_path, "alan")]
+    # Create a plain file where the state directory would go, so mkdir(parents=True)
+    # fails with OSError (FileExistsError) instead of succeeding.
+    (tmp_path / ".batch_state").write_text("not a directory", encoding="utf-8")
+
+    class SyncLlmClient:
+        def generate(self, request, **_kwargs):
+            return LlmResult(
+                structured=week_assessment(request.payload.menu), model=request.model, attempt=1
+            )
+
+    orchestrator = RunOrchestrator(
+        app_config=_batch_app_config(),
+        users=users,
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=SyncLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=FakeDiscordClient(),
+        capability_check=_no_capability_check,
+    )
+
+    results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
 
     assert results[0].status == WorkflowStatus.COMPLETED

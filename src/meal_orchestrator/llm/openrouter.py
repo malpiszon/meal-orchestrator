@@ -172,6 +172,16 @@ class OpenRouterClient:
         self._api_key = api_key if api_key is not None else os.environ["OPENROUTER_API_KEY"]
         self._max_retries = max_retries
 
+    @property
+    def api_key(self) -> str:
+        """The key this client sends requests with.
+
+        Exposed so callers that talk to other OpenRouter endpoints outside
+        this class (e.g. the batch client) can reuse the same configured
+        credential instead of independently re-reading OPENROUTER_API_KEY.
+        """
+        return self._api_key
+
     def generate(
         self,
         request: LlmRequest,

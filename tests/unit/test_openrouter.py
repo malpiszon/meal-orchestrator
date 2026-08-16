@@ -116,6 +116,10 @@ def _mock_urlopen(response_body: bytes):
     return mock_resp
 
 
+def test_api_key_property_exposes_configured_key() -> None:
+    assert OpenRouterClient(api_key="configured-key").api_key == "configured-key"
+
+
 class TestOpenRouterClientGenerate:
     def test_returns_llm_result_with_structured_assessment(self) -> None:
         with patch(

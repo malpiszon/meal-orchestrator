@@ -47,6 +47,21 @@ def test_load_state_ignores_corrupt_file(tmp_path) -> None:
     assert load_state(tmp_path) is None
 
 
+def test_save_state_does_not_raise_when_state_dir_unwritable(tmp_path) -> None:
+    # A plain file where the state directory would go makes mkdir(parents=True) fail.
+    (tmp_path / ".batch_state").write_text("not a directory", encoding="utf-8")
+
+    save_state(tmp_path, _state())  # must not raise
+
+    assert load_state(tmp_path) is None
+
+
+def test_acquire_lock_returns_false_when_state_dir_unwritable(tmp_path) -> None:
+    (tmp_path / ".batch_state").write_text("not a directory", encoding="utf-8")
+
+    assert acquire_lock(tmp_path) is False  # must not raise
+
+
 def test_acquire_lock_blocks_second_caller_then_releases(tmp_path) -> None:
     assert acquire_lock(tmp_path) is True
     assert acquire_lock(tmp_path) is False
@@ -88,6 +103,27 @@ def test_poll_until_terminal_backs_off_then_completes() -> None:
 
     assert result == {"status": "completed"}
     assert sleeps == [1, 2]
+
+
+def test_poll_until_terminal_clamps_initial_interval_to_max() -> None:
+    """Defense in depth: even if a BatchConfig is constructed directly with
+    initial_poll_interval_seconds > max_poll_interval_seconds (bypassing the
+    loader's cross-validation), the first sleep must still respect the max.
+    """
+    config = BatchConfig(initial_poll_interval_seconds=100, max_poll_interval_seconds=10)
+    statuses = iter(["in_progress", "completed"])
+    sleeps: list[float] = []
+
+    result = poll_until_terminal(
+        "batch-1",
+        config,
+        get_batch=lambda batch_id: {"status": next(statuses)},
+        is_pending=lambda data: data["status"] != "completed",
+        sleep=sleeps.append,
+    )
+
+    assert result == {"status": "completed"}
+    assert sleeps == [10]
 
 
 def test_poll_until_terminal_returns_none_on_timeout() -> None:

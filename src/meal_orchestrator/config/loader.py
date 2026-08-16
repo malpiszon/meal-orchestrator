@@ -81,16 +81,23 @@ def _parse_batch(data: dict[str, Any]) -> BatchConfig:
     enabled = raw.get("enabled", defaults.enabled)
     if not isinstance(enabled, bool):
         raise ConfigError("llm.batch.enabled must be a boolean")
+    initial_poll_interval_seconds = _positive_int(
+        raw.get("initial_poll_interval_seconds", defaults.initial_poll_interval_seconds),
+        "llm.batch.initial_poll_interval_seconds",
+    )
+    max_poll_interval_seconds = _positive_int(
+        raw.get("max_poll_interval_seconds", defaults.max_poll_interval_seconds),
+        "llm.batch.max_poll_interval_seconds",
+    )
+    if initial_poll_interval_seconds > max_poll_interval_seconds:
+        raise ConfigError(
+            "llm.batch.initial_poll_interval_seconds must not exceed "
+            "llm.batch.max_poll_interval_seconds"
+        )
     return BatchConfig(
         enabled=enabled,
-        initial_poll_interval_seconds=_positive_int(
-            raw.get("initial_poll_interval_seconds", defaults.initial_poll_interval_seconds),
-            "llm.batch.initial_poll_interval_seconds",
-        ),
-        max_poll_interval_seconds=_positive_int(
-            raw.get("max_poll_interval_seconds", defaults.max_poll_interval_seconds),
-            "llm.batch.max_poll_interval_seconds",
-        ),
+        initial_poll_interval_seconds=initial_poll_interval_seconds,
+        max_poll_interval_seconds=max_poll_interval_seconds,
         max_wait_hours=_positive_int(
             raw.get("max_wait_hours", defaults.max_wait_hours), "llm.batch.max_wait_hours"
         ),
