@@ -4,10 +4,12 @@ import json
 import logging
 import os
 import time
+import urllib.error
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from meal_orchestrator.config.models import BatchConfig
 
@@ -102,20 +104,25 @@ def acquire_lock(project_root: Path) -> bool:
     lock, or if the lock can't be acquired at all (e.g. a read-only project
     root) — either way, callers treat False as "can't do the durable/
     coordinated thing right now" and fall back accordingly.
+
+    Uses an atomic create-then-link for the actual acquisition (see
+    `_try_create_lock_file`) so two processes racing to acquire at the same
+    instant can't both succeed — a plain exists()-then-write() check has a
+    window where both would see "no lock" and both proceed, defeating the
+    whole point of the lock.
     """
     lock_path = _state_dir(project_root) / _LOCK_FILE_NAME
     try:
         lock_path.parent.mkdir(parents=True, exist_ok=True)
-        if lock_path.exists():
-            try:
-                pid = int(lock_path.read_text(encoding="utf-8").strip())
-                os.kill(pid, 0)
-            except (ValueError, ProcessLookupError, PermissionError, OSError):
-                pass
-            else:
-                return False
-        lock_path.write_text(str(os.getpid()), encoding="utf-8")
-        return True
+        if _try_create_lock_file(lock_path):
+            return True
+        if _lock_holder_is_alive(lock_path):
+            return False
+        # Stale lock from a dead process — clear it and make one retry attempt.
+        # If we lose a race here too, be conservative and report unavailable
+        # rather than looping; the caller falls back gracefully either way.
+        lock_path.unlink(missing_ok=True)
+        return _try_create_lock_file(lock_path)
     except OSError:
         logger.warning(
             "batch run lock could not be acquired at %s due to a filesystem error — "
@@ -124,6 +131,38 @@ def acquire_lock(project_root: Path) -> bool:
             exc_info=True,
         )
         return False
+
+
+def _try_create_lock_file(lock_path: Path) -> bool:
+    """Atomically create `lock_path` already containing our PID.
+
+    Writing content via `os.open(O_CREAT|O_EXCL)` then a separate write()
+    leaves a window where the file exists but is still empty — a concurrent
+    caller can observe that empty file, fail to parse a PID from it, and
+    wrongly conclude the lock is stale/abandoned and safe to steal. Instead,
+    write the full content to a uniquely-named temp file first, then
+    `os.link` it into place: `link()` atomically fails with FileExistsError
+    if the target already exists, and by construction there's no moment
+    where the target exists without its final content.
+    """
+    tmp_path = lock_path.with_name(f"{lock_path.name}.{uuid4().hex}.tmp")
+    tmp_path.write_text(str(os.getpid()), encoding="utf-8")
+    try:
+        os.link(tmp_path, lock_path)
+        return True
+    except FileExistsError:
+        return False
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+def _lock_holder_is_alive(lock_path: Path) -> bool:
+    try:
+        pid = int(lock_path.read_text(encoding="utf-8").strip())
+        os.kill(pid, 0)
+    except (ValueError, ProcessLookupError, PermissionError, OSError):
+        return False
+    return True
 
 
 def release_lock(project_root: Path) -> None:
@@ -146,15 +185,31 @@ def poll_until_terminal(
     is capped at `max_poll_interval_seconds` — matched to typical batch
     turnaround (seconds to minutes) without hammering the API if a batch runs
     long.
+
+    A single status check can fail (network blip, transient HTTP error,
+    malformed response body) without ending the wait — over a loop that can
+    span many hours, one bad check must not crash the whole run. It's logged
+    and treated as an inconclusive/pending check instead; persistent failures
+    are still bounded by `max_wait_hours`, which lets the caller's existing
+    timeout-fallback path take over.
     """
     deadline = (started_at or datetime.now(UTC)).timestamp() + config.max_wait_hours * 3600
     # Clamped defensively in case initial > max (loader.py validates this too, but
     # a caller could construct BatchConfig directly without going through it).
     interval = min(config.initial_poll_interval_seconds, config.max_poll_interval_seconds)
     while True:
-        data = get_batch(batch_id)
-        if not is_pending(data):
-            return data
+        try:
+            data = get_batch(batch_id)
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            logger.warning(
+                "batch status check failed for batch_id=%s (will retry): %s",
+                batch_id,
+                exc,
+                exc_info=True,
+            )
+        else:
+            if not is_pending(data):
+                return data
         if time.time() >= deadline:
             return None
         sleep(min(interval, max(0.0, deadline - time.time())))

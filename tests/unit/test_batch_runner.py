@@ -72,6 +72,33 @@ def test_acquire_lock_blocks_second_caller_then_releases(tmp_path) -> None:
     release_lock(tmp_path)
 
 
+def test_acquire_lock_exactly_one_winner_under_concurrent_contention(tmp_path) -> None:
+    """Regression test for a check-then-write TOCTOU race: many threads racing
+    to acquire the lock at once must yield exactly one True, not several —
+    the whole point of the lock is to prevent double batch submission.
+    """
+    import threading
+
+    outcomes: list[bool] = []
+    outcomes_lock = threading.Lock()
+    start_barrier = threading.Barrier(20)
+
+    def attempt() -> None:
+        start_barrier.wait()  # line everyone up to maximize actual overlap
+        got = acquire_lock(tmp_path)
+        with outcomes_lock:
+            outcomes.append(got)
+
+    threads = [threading.Thread(target=attempt) for _ in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert outcomes.count(True) == 1
+    assert outcomes.count(False) == 19
+
+
 def test_poll_until_terminal_returns_immediately_when_already_done() -> None:
     config = BatchConfig(initial_poll_interval_seconds=1, max_poll_interval_seconds=10)
     sleeps: list[float] = []
@@ -103,6 +130,61 @@ def test_poll_until_terminal_backs_off_then_completes() -> None:
 
     assert result == {"status": "completed"}
     assert sleeps == [1, 2]
+
+
+def test_poll_until_terminal_survives_a_transient_error_and_keeps_polling() -> None:
+    """A single network blip / transient HTTP error fetching batch status must
+    not crash the whole (potentially many-hours-long) wait — it should be
+    logged and treated as inconclusive, with polling continuing normally.
+    """
+    import urllib.error
+
+    config = BatchConfig(initial_poll_interval_seconds=1, max_poll_interval_seconds=10)
+    sleeps: list[float] = []
+    calls = {"n": 0}
+
+    def flaky_get_batch(batch_id):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise urllib.error.URLError("connection reset")
+        if calls["n"] < 4:
+            return {"status": "in_progress"}
+        return {"status": "completed"}
+
+    result = poll_until_terminal(
+        "batch-1",
+        config,
+        get_batch=flaky_get_batch,
+        is_pending=lambda data: data["status"] != "completed",
+        sleep=sleeps.append,
+    )
+
+    assert result == {"status": "completed"}
+    assert calls["n"] == 4
+
+
+def test_poll_until_terminal_eventually_times_out_if_every_check_errors() -> None:
+    import datetime as dt
+    import urllib.error
+
+    config = BatchConfig(
+        initial_poll_interval_seconds=1, max_poll_interval_seconds=10, max_wait_hours=1
+    )
+    started_at = dt.datetime.now(dt.UTC) - dt.timedelta(hours=2)
+
+    def always_fails(batch_id):
+        raise urllib.error.URLError("connection reset")
+
+    result = poll_until_terminal(
+        "batch-1",
+        config,
+        get_batch=always_fails,
+        is_pending=lambda data: True,
+        sleep=lambda seconds: None,
+        started_at=started_at,
+    )
+
+    assert result is None
 
 
 def test_poll_until_terminal_clamps_initial_interval_to_max() -> None:

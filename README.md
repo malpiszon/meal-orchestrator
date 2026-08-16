@@ -252,7 +252,12 @@ auto-generated notes.
   (no extra scheduled job is needed; the single existing trigger just takes
   longer). If the batch doesn't complete in time, the run automatically
   falls back to synchronous per-user calls and sends an ops Discord alert.
-  Disabled by default; always bypassed for dry runs.
+  Disabled by default; always bypassed for dry runs. OpenRouter's batch API
+  has no documented/discoverable cancel endpoint (checked empirically), so
+  a batch that's abandoned on timeout/failure keeps running and billing on
+  OpenRouter's side — the synchronous fallback is a genuine double cost in
+  that case, not just a fallback. Keep `max_wait_hours` comfortably above
+  typical turnaround to make this rare.
 - If any purchased meal is missing for any day in the target week, that
   user's entire run is treated as menu-unavailable — there's no
   partial-week handling.

@@ -266,6 +266,7 @@ class UserWorkflowExecutor:
         """
         log_context = {**log_context, "worker": threading.current_thread().name}
         try:
+            state.failed_step = "save_llm_response"
             artifacts.save_llm_response(llm_result)
             state.model = llm_result.model
             state.token_usage = llm_result.token_usage

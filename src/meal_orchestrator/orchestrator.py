@@ -449,7 +449,19 @@ class RunOrchestrator:
             selected_users, resume_options, state.run_id, week_start, week_end, clients, notify_ops
         )
         for pending_user in state.users:
-            if pending_user.user_id in users_by_id and pending_user.user_id not in pending:
+            if pending_user.user_id not in users_by_id:
+                logger.warning(
+                    "batch resume: user %s from the pending batch is no longer in the "
+                    "user config — any already-completed (and billed) batch result for "
+                    "them is being discarded, since they can no longer be delivered to",
+                    pending_user.user_id,
+                    extra={
+                        "run_id": state.run_id,
+                        "user_id": pending_user.user_id,
+                        "step": "batch_resume",
+                    },
+                )
+            elif pending_user.user_id not in pending:
                 logger.warning(
                     "batch resume: menu re-fetch did not succeed for user %s before batch "
                     "results could be matched — any already-completed (and billed) batch "
@@ -508,6 +520,9 @@ class RunOrchestrator:
                 "batch submission skipped: another invocation already holds the run lock; "
                 "falling back to synchronous processing",
                 extra={"run_id": run_id, "step": "batch_submit"},
+            )
+            self._notify_batch_fallback(
+                discord_client, run_id, "batch submission skipped: run lock already held"
             )
             return self._process_pending_in_parallel(
                 pending, max_concurrent_users, run_id, notify_ops
@@ -592,8 +607,12 @@ class RunOrchestrator:
             is_pending=lambda d: batch_status(d) in PENDING_STATUSES,
             started_at=started_at,
         )
-        clear_state(self.project_root)
 
+        # State is kept alive through delivery (not cleared right after polling
+        # ends) so a crash during delivery can still resume — get_batch is a
+        # free re-check against an already-finished batch, and per-user email
+        # delivery is idempotent (same idempotency_key across a resumed run_id),
+        # so re-running delivery after a crash is safe, not just re-billable.
         if data is None or batch_status(data) != BatchStatus.COMPLETED:
             logger.warning(
                 "openrouter batch did not complete usably; falling back to synchronous "
@@ -605,15 +624,21 @@ class RunOrchestrator:
                     "step": "batch_fallback",
                 },
             )
-            self._notify_batch_fallback(discord_client, run_id, batch_id)
-            return self._process_pending_in_parallel(
+            self._notify_batch_fallback(
+                discord_client, run_id, f"batch {batch_id} did not complete in time or failed"
+            )
+            results = self._process_pending_in_parallel(
                 pending, max_concurrent_users, run_id, notify_ops
             )
+            clear_state(self.project_root)
+            return results
 
         results, errors = parse_batch_results(rows, data)
-        return self._deliver_batch_results(
+        delivered = self._deliver_batch_results(
             results, errors, pending, max_concurrent_users, run_id, notify_ops
         )
+        clear_state(self.project_root)
+        return delivered
 
     def _deliver_batch_results(
         self,
@@ -691,7 +716,7 @@ class RunOrchestrator:
         return results_by_user_id
 
     def _notify_batch_fallback(
-        self, discord_client: DiscordClient, run_id: str, batch_id: str
+        self, discord_client: DiscordClient, run_id: str, reason: str
     ) -> None:
         webhook_env = self.app_config.delivery.operational_discord_webhook_env
         if not webhook_env or not os.environ.get(webhook_env):
@@ -702,8 +727,7 @@ class RunOrchestrator:
                     webhook_env=webhook_env,
                     title="Batch processing fell back to synchronous",
                     description=(
-                        f"OpenRouter batch {batch_id} (run {run_id}) did not complete in time "
-                        "or failed; falling back to synchronous per-user calls."
+                        f"Run {run_id}: {reason}; falling back to synchronous per-user calls."
                     ),
                     color=COLOR_WARNING,
                 )

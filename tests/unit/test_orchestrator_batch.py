@@ -44,6 +44,82 @@ def _batch_app_config(**batch_kwargs) -> AppConfig:
     return app_config(batch=BatchConfig(enabled=True, **batch_kwargs))
 
 
+def test_batch_state_persists_through_delivery_not_cleared_before_it(tmp_path, monkeypatch) -> None:
+    """The pending-batch state file must stay in place until delivery is
+    actually finished, not right after polling reports COMPLETED — otherwise
+    a crash during delivery (email/Discord for many users) loses the ability
+    to resume, forcing a full duplicate (billable) batch resubmission.
+    """
+    users = [_user(tmp_path, "alan")]
+    state_path = tmp_path / ".batch_state" / "pending_batch.json"
+    captured_custom_ids: list[str] = []
+
+    def capturing_submit_batch(rows, **_kwargs):
+        captured_custom_ids.extend(row.custom_id for row in rows)
+        return "batch-1"
+
+    def fake_get_batch(batch_id, **_kwargs):
+        return {
+            "status": "completed",
+            "results": [
+                {
+                    "custom_id": custom_id,
+                    "response": {
+                        "status_code": 200,
+                        "body": {
+                            "model": "test-model",
+                            "choices": [
+                                {
+                                    "message": {
+                                        "content": week_assessment(
+                                            canonical_menu()
+                                        ).model_dump_json()
+                                    }
+                                }
+                            ],
+                            "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+                        },
+                    },
+                    "error": None,
+                }
+                for custom_id in captured_custom_ids
+            ],
+        }
+
+    monkeypatch.setattr("meal_orchestrator.orchestrator.submit_batch", capturing_submit_batch)
+    monkeypatch.setattr("meal_orchestrator.orchestrator.get_batch", fake_get_batch)
+
+    state_existed_during_delivery = []
+    original_deliver = RunOrchestrator._deliver_batch_results
+
+    def spy_deliver(self, *args, **kwargs):
+        state_existed_during_delivery.append(state_path.exists())
+        return original_deliver(self, *args, **kwargs)
+
+    monkeypatch.setattr(RunOrchestrator, "_deliver_batch_results", spy_deliver)
+
+    class UnusedLlmClient:
+        def generate(self, request, **_kwargs):
+            raise AssertionError("synchronous LLM client must not be used when batch succeeds")
+
+    orchestrator = RunOrchestrator(
+        app_config=_batch_app_config(),
+        users=users,
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=UnusedLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=FakeDiscordClient(),
+        capability_check=_no_capability_check,
+    )
+
+    results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert results[0].status == WorkflowStatus.COMPLETED
+    assert state_existed_during_delivery == [True]
+    assert not state_path.exists()
+
+
 def test_batch_mode_submits_polls_and_delivers(tmp_path, monkeypatch) -> None:
     users = [_user(tmp_path, "alan"), _user(tmp_path, "bob")]
     submitted_rows = []
@@ -335,6 +411,90 @@ def test_batch_mode_resumes_pending_state_instead_of_resubmitting(tmp_path, monk
     assert not (tmp_path / ".batch_state" / "pending_batch.json").exists()
 
 
+def test_batch_resume_warns_when_a_pending_user_was_removed_from_config(
+    tmp_path, monkeypatch, caplog
+) -> None:
+    """A user present in the saved batch state but no longer in the current
+    user config must not be silently dropped — their share of the batch was
+    already submitted and billed, so losing it needs to be visible in logs.
+    """
+    import logging
+
+    users = [_user(tmp_path, "alan")]  # "bob" was removed from config
+    save_state(
+        tmp_path,
+        PendingBatchState(
+            run_id="run-resume",
+            batch_id="batch-existing",
+            submitted_at="2026-06-01T00:00:00+00:00",
+            week_start="2026-06-01",
+            week_end="2026-06-05",
+            model="test-model",
+            users=[
+                PendingBatchUser(user_id="alan", custom_id="run-resume:alan"),
+                PendingBatchUser(user_id="bob", custom_id="run-resume:bob"),
+            ],
+        ),
+    )
+
+    monkeypatch.setattr(
+        "meal_orchestrator.orchestrator.submit_batch", lambda rows, **k: "should-not-be-called"
+    )
+
+    def fake_get_batch(batch_id, **_kwargs):
+        return {
+            "status": "completed",
+            "results": [
+                {
+                    "custom_id": "run-resume:alan",
+                    "response": {
+                        "status_code": 200,
+                        "body": {
+                            "model": "test-model",
+                            "choices": [
+                                {
+                                    "message": {
+                                        "content": week_assessment(
+                                            canonical_menu()
+                                        ).model_dump_json()
+                                    }
+                                }
+                            ],
+                            "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+                        },
+                    },
+                    "error": None,
+                }
+            ],
+        }
+
+    monkeypatch.setattr("meal_orchestrator.orchestrator.get_batch", fake_get_batch)
+
+    class UnusedLlmClient:
+        def generate(self, request, **_kwargs):
+            raise AssertionError("synchronous LLM client must not be used on batch resume")
+
+    orchestrator = RunOrchestrator(
+        app_config=_batch_app_config(),
+        users=users,
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=UnusedLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=FakeDiscordClient(),
+        capability_check=_no_capability_check,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert results[0].status == WorkflowStatus.COMPLETED
+    assert any(
+        "bob" in record.message and "no longer in the user config" in record.message
+        for record in caplog.records
+    )
+
+
 def test_batch_mode_skipped_for_dry_run(tmp_path, monkeypatch) -> None:
     users = [_user(tmp_path, "alan")]
 
@@ -365,9 +525,10 @@ def test_batch_mode_skipped_for_dry_run(tmp_path, monkeypatch) -> None:
     assert results[0].status == WorkflowStatus.COMPLETED
 
 
-def test_batch_submission_falls_back_to_sync_when_lock_already_held(tmp_path) -> None:
+def test_batch_submission_falls_back_to_sync_when_lock_already_held(tmp_path, monkeypatch) -> None:
     from meal_orchestrator.batch_runner import acquire_lock
 
+    monkeypatch.setenv("DISCORD_OPS_WEBHOOK_URL", "https://example.com/ops")
     users = [_user(tmp_path, "alan")]
     assert acquire_lock(tmp_path) is True  # simulate another invocation already running
 
@@ -377,6 +538,7 @@ def test_batch_submission_falls_back_to_sync_when_lock_already_held(tmp_path) ->
                 structured=week_assessment(request.payload.menu), model=request.model, attempt=1
             )
 
+    discord = FakeDiscordClient()
     orchestrator = RunOrchestrator(
         app_config=_batch_app_config(),
         users=users,
@@ -384,13 +546,20 @@ def test_batch_submission_falls_back_to_sync_when_lock_already_held(tmp_path) ->
         provider_factory=lambda provider_id: RecordingProvider(),
         llm_client=SyncLlmClient(),
         email_client=FakeEmailClient(),
-        discord_client=FakeDiscordClient(),
+        discord_client=discord,
         capability_check=_no_capability_check,
     )
 
     results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
 
     assert results[0].status == WorkflowStatus.COMPLETED
+    # The submit-side lock-busy fallback must alert ops the same way the
+    # timeout/failure fallback does — silently falling back to full-price
+    # synchronous calls with only a log line would go unnoticed.
+    fallback_msg = next(
+        m for m in discord.messages if "falling back to synchronous" in m.description
+    )
+    assert "run lock already held" in fallback_msg.description
 
 
 def test_batch_resume_reports_failure_not_empty_success_when_lock_held(tmp_path) -> None:

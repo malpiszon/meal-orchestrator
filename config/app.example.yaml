@@ -21,6 +21,9 @@ llm:
   # separate scheduled job is needed. If the batch doesn't complete in time,
   # the run automatically falls back to synchronous per-user calls so users
   # still get their plan, and sends an ops Discord alert. Disabled by default.
+  # NOTE: OpenRouter has no cancel-batch endpoint (verified empirically), so an
+  # abandoned batch keeps running/billing after a timeout fallback — that's a
+  # genuine double cost, not just a safety net. Keep max_wait_hours generous.
   batch:
     enabled: false
     initial_poll_interval_seconds: 120
