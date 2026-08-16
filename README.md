@@ -252,7 +252,13 @@ auto-generated notes.
   (no extra scheduled job is needed; the single existing trigger just takes
   longer). If the batch doesn't complete in time, the run automatically
   falls back to synchronous per-user calls and sends an ops Discord alert.
-  Disabled by default; always bypassed for dry runs. OpenRouter's batch API
+  Individual rows within an otherwise-completed batch can also fail (e.g. a
+  malformed response for one user); those are retried synchronously too —
+  with the same full retry/fallback_models resilience a sync-mode call would
+  get — and if any row needed that fallback, one aggregate ops alert names
+  how many/which users, so a systemic batch problem doesn't stay buried in
+  N separate per-user notifications. Disabled by default; always bypassed
+  for dry runs. OpenRouter's batch API
   has no documented/discoverable cancel endpoint (checked empirically), so
   a batch that's abandoned on timeout/failure keeps running and billing on
   OpenRouter's side — the synchronous fallback is a genuine double cost in

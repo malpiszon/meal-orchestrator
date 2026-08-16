@@ -216,7 +216,9 @@ def test_batch_mode_retries_row_failures_synchronously_with_fallback_models(
                 attempt=2,
             )
 
+    monkeypatch.setenv("DISCORD_OPS_WEBHOOK_URL", "https://example.com/ops")
     email_client = FakeEmailClient()
+    discord = FakeDiscordClient()
     orchestrator = RunOrchestrator(
         app_config=app_config(
             fallback_models=["fallback-model"], batch=BatchConfig(enabled=True)
@@ -226,7 +228,7 @@ def test_batch_mode_retries_row_failures_synchronously_with_fallback_models(
         provider_factory=lambda provider_id: RecordingProvider(),
         llm_client=FallbackOnlyLlmClient(),
         email_client=email_client,
-        discord_client=FakeDiscordClient(),
+        discord_client=discord,
         capability_check=_no_capability_check,
     )
 
@@ -235,6 +237,156 @@ def test_batch_mode_retries_row_failures_synchronously_with_fallback_models(
     assert all(r.status == WorkflowStatus.COMPLETED for r in results)
     assert all(r.model == "fallback-model" for r in results)
     assert len(email_client.messages) == 2
+    # Both rows needed synchronous retry — a systemic-looking failure — so a
+    # single aggregate ops alert must fire alongside the per-user ones, not
+    # just N individual "completed" notifications with no pattern visible.
+    summary_msg = next(
+        m for m in discord.messages if "batch rows required synchronous fallback" in m.description
+    )
+    assert "2/2" in summary_msg.description
+    assert "alan" in summary_msg.description
+    assert "bob" in summary_msg.description
+
+
+def test_batch_mode_single_row_failure_still_sends_aggregate_alert(tmp_path, monkeypatch) -> None:
+    """Even a single failed row (not just a mass/systemic failure) gets the
+    summary alert — it's cheap to send and there's no safe threshold below
+    which a paid-for batch row silently needing a full-price retry should
+    stay invisible at the aggregate level.
+    """
+    users = [_user(tmp_path, "alan"), _user(tmp_path, "bob")]
+    monkeypatch.setenv("DISCORD_OPS_WEBHOOK_URL", "https://example.com/ops")
+
+    submitted_ids: list[str] = []
+
+    def capturing_submit_batch(rows, **_kwargs):
+        submitted_ids.extend(row.custom_id for row in rows)
+        return "batch-1"
+
+    def fake_get_batch(batch_id, **_kwargs):
+        # Only alan's row comes back completed — bob's is simply absent from
+        # the results, which parse_batch_results reports as "missing_from_batch".
+        completed_ids = [row_id for row_id in submitted_ids if "alan" in row_id]
+        return {
+            "status": "completed",
+            "results": [
+                {
+                    "custom_id": row_id,
+                    "response": {
+                        "status_code": 200,
+                        "body": {
+                            "model": "test-model",
+                            "choices": [
+                                {
+                                    "message": {
+                                        "content": week_assessment(
+                                            canonical_menu()
+                                        ).model_dump_json()
+                                    }
+                                }
+                            ],
+                            "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+                        },
+                    },
+                    "error": None,
+                }
+                for row_id in completed_ids
+            ],
+        }
+
+    monkeypatch.setattr("meal_orchestrator.orchestrator.submit_batch", capturing_submit_batch)
+    monkeypatch.setattr("meal_orchestrator.orchestrator.get_batch", fake_get_batch)
+
+    class SyncFallbackLlmClient:
+        def generate(self, request, **_kwargs):
+            return LlmResult(
+                structured=week_assessment(request.payload.menu), model=request.model, attempt=1
+            )
+
+    discord = FakeDiscordClient()
+    orchestrator = RunOrchestrator(
+        app_config=_batch_app_config(),
+        users=users,
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=SyncFallbackLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=discord,
+        capability_check=_no_capability_check,
+    )
+
+    results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert all(r.status == WorkflowStatus.COMPLETED for r in results)
+    summary_msg = next(
+        m for m in discord.messages if "batch rows required synchronous fallback" in m.description
+    )
+    assert "1/2" in summary_msg.description
+    assert "bob" in summary_msg.description
+
+
+def test_batch_mode_no_aggregate_alert_when_every_row_succeeds(tmp_path, monkeypatch) -> None:
+    users = [_user(tmp_path, "alan")]
+    monkeypatch.setenv("DISCORD_OPS_WEBHOOK_URL", "https://example.com/ops")
+    submitted_ids: list[str] = []
+
+    def capturing_submit_batch(rows, **_kwargs):
+        submitted_ids.extend(row.custom_id for row in rows)
+        return "batch-1"
+
+    def fake_get_batch(batch_id, **_kwargs):
+        return {
+            "status": "completed",
+            "results": [
+                {
+                    "custom_id": custom_id,
+                    "response": {
+                        "status_code": 200,
+                        "body": {
+                            "model": "test-model",
+                            "choices": [
+                                {
+                                    "message": {
+                                        "content": week_assessment(
+                                            canonical_menu()
+                                        ).model_dump_json()
+                                    }
+                                }
+                            ],
+                            "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+                        },
+                    },
+                    "error": None,
+                }
+                for custom_id in submitted_ids
+            ],
+        }
+
+    monkeypatch.setattr("meal_orchestrator.orchestrator.submit_batch", capturing_submit_batch)
+    monkeypatch.setattr("meal_orchestrator.orchestrator.get_batch", fake_get_batch)
+
+    class UnusedLlmClient:
+        def generate(self, request, **_kwargs):
+            raise AssertionError("synchronous LLM client must not be used when batch succeeds")
+
+    discord = FakeDiscordClient()
+    orchestrator = RunOrchestrator(
+        app_config=_batch_app_config(),
+        users=users,
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=UnusedLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=discord,
+        capability_check=_no_capability_check,
+    )
+
+    results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert all(r.status == WorkflowStatus.COMPLETED for r in results)
+    assert not any(
+        "batch rows required synchronous fallback" in m.description for m in discord.messages
+    )
 
 
 def test_batch_mode_falls_back_to_sync_when_batch_times_out(tmp_path, monkeypatch) -> None:

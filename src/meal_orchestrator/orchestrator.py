@@ -635,7 +635,7 @@ class RunOrchestrator:
 
         results, errors = parse_batch_results(rows, data)
         delivered = self._deliver_batch_results(
-            results, errors, pending, max_concurrent_users, run_id, notify_ops
+            results, errors, pending, max_concurrent_users, run_id, notify_ops, discord_client
         )
         clear_state(self.project_root)
         return delivered
@@ -648,6 +648,7 @@ class RunOrchestrator:
         max_concurrent_users: int,
         run_id: str,
         notify_ops: Callable[[str, WorkflowResult], None],
+        discord_client: DiscordClient,
     ) -> dict[str, WorkflowResult]:
         """Deliver every completed row, and retry every failed/missing row
         synchronously (full retry + fallback_models + artifacts trail via
@@ -658,6 +659,7 @@ class RunOrchestrator:
         if not pending:
             return results_by_user_id
 
+        fallback_user_ids: list[str] = []
         max_workers = min(len(pending), max_concurrent_users)
         with ThreadPoolExecutor(
             max_workers=max_workers, thread_name_prefix="batch-deliver"
@@ -677,6 +679,7 @@ class RunOrchestrator:
                         pending_user.outcome.log_context,
                     )
                 else:
+                    fallback_user_ids.append(user_id)
                     row_error = errors.get(custom_id)
                     logger.warning(
                         "batch row unusable for user=%s reason=%s; retrying synchronously",
@@ -712,6 +715,19 @@ class RunOrchestrator:
                     )
                 results_by_user_id[user_id] = result
                 notify_ops(user_id, result)
+
+        if fallback_user_ids:
+            # A handful of individual row failures is normal and already visible
+            # via the per-user ops notifications above — but a systemic problem
+            # with the batch (e.g. most/all rows failing) is easy to miss as a
+            # pattern buried in N separate messages, so it also gets one summary
+            # alert naming exactly who needed the synchronous fallback.
+            self._notify_batch_fallback(
+                discord_client,
+                run_id,
+                f"{len(fallback_user_ids)}/{len(pending)} batch rows required synchronous "
+                f"fallback (users: {', '.join(sorted(fallback_user_ids))})",
+            )
 
         return results_by_user_id
 
