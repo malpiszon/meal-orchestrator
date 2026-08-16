@@ -202,6 +202,64 @@ def test_batch_mode_falls_back_to_sync_when_batch_times_out(tmp_path, monkeypatc
     assert fallback_msg.color is not None
 
 
+def test_batch_resume_deadline_counts_from_original_submission_not_resume_time(
+    tmp_path, monkeypatch
+) -> None:
+    """max_wait_hours must bound total wait from the batch's original submission,
+    not reset to a fresh window every time a crashed process resumes polling —
+    otherwise a batch that keeps crashing right before completing could poll
+    forever, well past the configured cap.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    long_expired_submission = (datetime.now(UTC) - timedelta(hours=5)).isoformat()
+    save_state(
+        tmp_path,
+        PendingBatchState(
+            run_id="run-resume",
+            batch_id="batch-existing",
+            submitted_at=long_expired_submission,
+            week_start="2026-06-01",
+            week_end="2026-06-05",
+            model="test-model",
+            users=[PendingBatchUser(user_id="alan", custom_id="run-resume:alan")],
+        ),
+    )
+
+    get_batch_calls = []
+
+    def fake_get_batch(batch_id, **_kwargs):
+        get_batch_calls.append(batch_id)
+        return {"status": "in_progress"}  # still pending, forever
+
+    monkeypatch.setattr("meal_orchestrator.orchestrator.get_batch", fake_get_batch)
+
+    class SyncFallbackLlmClient:
+        def generate(self, request, **_kwargs):
+            return LlmResult(
+                structured=week_assessment(request.payload.menu), model=request.model, attempt=1
+            )
+
+    orchestrator = RunOrchestrator(
+        app_config=_batch_app_config(max_wait_hours=1),
+        users=[_user(tmp_path, "alan")],
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=SyncFallbackLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=FakeDiscordClient(),
+        capability_check=_no_capability_check,
+    )
+
+    results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    # Submission was already 5h old against a 1h cap, so the deadline must be
+    # treated as already passed — a single status check, then immediate
+    # fallback to sync — not a fresh 1h wait counted from "now".
+    assert len(get_batch_calls) == 1
+    assert results[0].status == WorkflowStatus.COMPLETED
+
+
 def test_batch_mode_resumes_pending_state_instead_of_resubmitting(tmp_path, monkeypatch) -> None:
     users = [_user(tmp_path, "alan")]
     save_state(

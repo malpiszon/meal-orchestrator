@@ -165,7 +165,7 @@ class RunOrchestrator:
                     # test/custom llm_client implementations fall back to None, which the
                     # batch client resolves from OPENROUTER_API_KEY itself (unchanged
                     # behavior for anything that doesn't expose a configured key).
-                    getattr(clients.llm_client, "api_key", None),
+                    self._llm_api_key(clients),
                 )
             )
         else:
@@ -472,7 +472,8 @@ class RunOrchestrator:
                     state.run_id,
                     notify_ops,
                     discord_client,
-                    getattr(clients.llm_client, "api_key", None),
+                    self._llm_api_key(clients),
+                    datetime.fromisoformat(state.submitted_at),
                 )
             )
         finally:
@@ -514,12 +515,13 @@ class RunOrchestrator:
         try:
             rows = self._build_batch_rows(pending, run_id)
             batch_id = submit_batch(rows, api_key=api_key)
+            submitted_at = datetime.now(UTC)
             save_state(
                 self.project_root,
                 PendingBatchState(
                     run_id=run_id,
                     batch_id=batch_id,
-                    submitted_at=datetime.now(UTC).isoformat(),
+                    submitted_at=submitted_at.isoformat(),
                     week_start=week_start.isoformat(),
                     week_end=week_end.isoformat(),
                     model=model,
@@ -538,6 +540,7 @@ class RunOrchestrator:
                 notify_ops,
                 discord_client,
                 api_key,
+                submitted_at,
             )
         finally:
             release_lock(self.project_root)
@@ -573,13 +576,21 @@ class RunOrchestrator:
         notify_ops: Callable[[str, WorkflowResult], None],
         discord_client: DiscordClient,
         api_key: str | None,
+        started_at: datetime,
     ) -> dict[str, WorkflowResult]:
+        """`started_at` must be the batch's original submission time (not "now"),
+        so max_wait_hours bounds the total wait from submission — otherwise a
+        resumed batch (a fresh process, calling this again after a crash) would
+        silently reset the deadline to a full new max_wait_hours window instead
+        of continuing to count down from when the batch was actually submitted.
+        """
         batch_config = self.app_config.llm.batch
         data = poll_until_terminal(
             batch_id,
             batch_config,
             get_batch=lambda bid: get_batch(bid, api_key=api_key),
             is_pending=lambda d: batch_status(d) in PENDING_STATUSES,
+            started_at=started_at,
         )
         clear_state(self.project_root)
 
@@ -703,6 +714,15 @@ class RunOrchestrator:
                 exc_info=True,
                 extra={"run_id": run_id, "step": "batch_fallback"},
             )
+
+    @staticmethod
+    def _llm_api_key(clients: _RunClients) -> str | None:
+        """api_key is only guaranteed on the real OpenRouterClient — duck-typed
+        test/custom llm_client implementations fall back to None, which the
+        batch client resolves from OPENROUTER_API_KEY itself (unchanged
+        behavior for anything that doesn't expose a configured key).
+        """
+        return getattr(clients.llm_client, "api_key", None)
 
     def _resolve_model(self, options: RunOptions) -> str:
         default_model = self.app_config.llm.model
