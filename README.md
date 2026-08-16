@@ -244,10 +244,15 @@ auto-generated notes.
 ## Known limitations
 
 - No web UI or database; everything is driven by CLI + YAML config.
-- Only one LLM request per user per run (no batching). If a future change
-  moves to a batch-submit LLM API with long (up to 24h) wait times, the
-  `max_concurrent_users` sizing philosophy would need revisiting — today it
-  bounds concurrent HTTP round-trips, not concurrent long-lived waits.
+- Optional OpenRouter batch mode (`llm.batch.enabled`, beta on OpenRouter's
+  side) submits every user's LLM request as one batch for a ~50% token-price
+  discount. A run blocks internally — polling with exponential backoff — for
+  up to `llm.batch.max_wait_hours` instead of returning within minutes, so
+  the scheduler/container running it must allow that long an execution
+  (no extra scheduled job is needed; the single existing trigger just takes
+  longer). If the batch doesn't complete in time, the run automatically
+  falls back to synchronous per-user calls and sends an ops Discord alert.
+  Disabled by default; always bypassed for dry runs.
 - If any purchased meal is missing for any day in the target week, that
   user's entire run is treated as menu-unavailable — there's no
   partial-week handling.

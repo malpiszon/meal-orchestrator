@@ -13,6 +13,14 @@ class RuntimeConfig:
 
 
 @dataclass(frozen=True)
+class BatchConfig:
+    enabled: bool = False
+    initial_poll_interval_seconds: int = 120
+    max_poll_interval_seconds: int = 3600
+    max_wait_hours: int = 26
+
+
+@dataclass(frozen=True)
 class LlmConfig:
     provider: str
     model: str
@@ -20,6 +28,7 @@ class LlmConfig:
     max_retries: int
     dry_run_model: str | None = None
     fallback_models: list[str] = field(default_factory=list)
+    batch: BatchConfig = field(default_factory=BatchConfig)
 
 
 @dataclass(frozen=True)

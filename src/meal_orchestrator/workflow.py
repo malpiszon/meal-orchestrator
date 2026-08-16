@@ -220,7 +220,7 @@ class UserWorkflowExecutor:
         log_context = {**log_context, "worker": threading.current_thread().name}
         try:
             state.failed_step = "prompt"
-            llm_request = self._build_llm_request(user, run_context, menu, log_context)
+            llm_request = self.build_llm_request(user, run_context, menu, log_context)
             artifacts.save_llm_request(llm_request)
 
             state.failed_step = "llm"
@@ -241,6 +241,47 @@ class UserWorkflowExecutor:
                 user_id=user.id,
                 status=WorkflowStatus.COMPLETED,
                 retry_count=retry_count,
+                model=llm_result.model,
+            )
+        except Exception as exc:
+            return self._generic_failure_result(user, state, log_context, exc)
+        finally:
+            self._save_metadata(artifacts, user, run_context, state)
+
+    def execute_from_llm_result(
+        self,
+        user: UserConfig,
+        run_context: RunContext,
+        menu: CanonicalMenu,
+        llm_result: LlmResult,
+        artifacts: RunArtifacts,
+        state: _WorkflowState,
+        log_context: dict,
+    ) -> WorkflowResult:
+        """Deliver an already-generated LLM result via email + Discord.
+
+        Mirrors the tail of `execute_from_menu` after the LLM call — for use
+        when the LLM step already happened out-of-process (an OpenRouter batch
+        result), so there's nothing left to build/call, only to deliver.
+        """
+        log_context = {**log_context, "worker": threading.current_thread().name}
+        try:
+            artifacts.save_llm_response(llm_result)
+            state.model = llm_result.model
+            state.token_usage = llm_result.token_usage
+
+            state.failed_step = "email"
+            self._deliver_email(user, run_context, menu, llm_result, log_context)
+
+            state.failed_step = "discord"
+            self._notify_plan_ready(user, run_context, log_context)
+
+            logger.info("user workflow completed", extra={**log_context, "step": "complete"})
+            state.status = WorkflowStatus.COMPLETED
+            return WorkflowResult(
+                user_id=user.id,
+                status=WorkflowStatus.COMPLETED,
+                retry_count=0,
                 model=llm_result.model,
             )
         except Exception as exc:
@@ -300,7 +341,7 @@ class UserWorkflowExecutor:
         )
         return menu
 
-    def _build_llm_request(
+    def build_llm_request(
         self,
         user: UserConfig,
         run_context: RunContext,

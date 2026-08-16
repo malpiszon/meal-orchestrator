@@ -457,3 +457,71 @@ users:
 
     with pytest.raises(ConfigError, match="provider_offering_id"):
         load_users_config(path)
+
+
+def _base_app_yaml(extra_llm: str = "") -> str:
+    return f"""
+runtime:
+  timezone: Europe/Warsaw
+llm:
+  provider: openrouter
+  model: test
+  timeout_seconds: 30
+  max_retries: 1
+{extra_llm}
+providers:
+  default: example_provider
+delivery:
+  email_from: test@example.com
+  operational_discord_webhook_env: DISCORD_OPS_WEBHOOK_URL
+"""
+
+
+def test_batch_config_defaults_when_absent(tmp_path) -> None:
+    path = tmp_path / "app.yaml"
+    path.write_text(_base_app_yaml(), encoding="utf-8")
+
+    app = load_app_config(path)
+
+    assert app.llm.batch.enabled is False
+    assert app.llm.batch.initial_poll_interval_seconds == 120
+    assert app.llm.batch.max_poll_interval_seconds == 3600
+    assert app.llm.batch.max_wait_hours == 26
+
+
+def test_batch_config_loaded_when_present(tmp_path) -> None:
+    path = tmp_path / "app.yaml"
+    path.write_text(
+        _base_app_yaml(
+            """  batch:
+    enabled: true
+    initial_poll_interval_seconds: 60
+    max_poll_interval_seconds: 1800
+    max_wait_hours: 10
+"""
+        ),
+        encoding="utf-8",
+    )
+
+    app = load_app_config(path)
+
+    assert app.llm.batch.enabled is True
+    assert app.llm.batch.initial_poll_interval_seconds == 60
+    assert app.llm.batch.max_poll_interval_seconds == 1800
+    assert app.llm.batch.max_wait_hours == 10
+
+
+def test_batch_config_rejects_non_positive_max_wait_hours(tmp_path) -> None:
+    path = tmp_path / "app.yaml"
+    path.write_text(
+        _base_app_yaml(
+            """  batch:
+    enabled: true
+    max_wait_hours: 0
+"""
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="max_wait_hours"):
+        load_app_config(path)

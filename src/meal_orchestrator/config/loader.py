@@ -8,6 +8,7 @@ import yaml
 from meal_orchestrator.config.models import (
     AppConfig,
     ArtifactConfig,
+    BatchConfig,
     DeliveryConfig,
     LlmConfig,
     RuntimeConfig,
@@ -39,6 +40,7 @@ def load_app_config(path: Path) -> AppConfig:
             fallback_models=_parse_fallback_models(
                 _optional(data, "llm", "fallback_models"), llm_model
             ),
+            batch=_parse_batch(data),
         ),
         default_provider=_required(data, "providers", "default"),
         delivery=DeliveryConfig(
@@ -67,6 +69,38 @@ def _parse_max_concurrent_users(raw: Any) -> int:
     if isinstance(raw, bool) or not isinstance(raw, int) or raw < 1:
         raise ConfigError("runtime.max_concurrent_users must be a positive integer")
     return raw
+
+
+def _parse_batch(data: dict[str, Any]) -> BatchConfig:
+    raw = data.get("llm", {}).get("batch") if isinstance(data.get("llm"), dict) else None
+    if raw is None:
+        return BatchConfig()
+    if not isinstance(raw, dict):
+        raise ConfigError("llm.batch must be a mapping")
+    defaults = BatchConfig()
+    enabled = raw.get("enabled", defaults.enabled)
+    if not isinstance(enabled, bool):
+        raise ConfigError("llm.batch.enabled must be a boolean")
+    return BatchConfig(
+        enabled=enabled,
+        initial_poll_interval_seconds=_positive_int(
+            raw.get("initial_poll_interval_seconds", defaults.initial_poll_interval_seconds),
+            "llm.batch.initial_poll_interval_seconds",
+        ),
+        max_poll_interval_seconds=_positive_int(
+            raw.get("max_poll_interval_seconds", defaults.max_poll_interval_seconds),
+            "llm.batch.max_poll_interval_seconds",
+        ),
+        max_wait_hours=_positive_int(
+            raw.get("max_wait_hours", defaults.max_wait_hours), "llm.batch.max_wait_hours"
+        ),
+    )
+
+
+def _positive_int(value: Any, field_name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ConfigError(f"{field_name} must be a positive integer")
+    return value
 
 
 def _parse_artifacts(data: dict[str, Any]) -> ArtifactConfig | None:

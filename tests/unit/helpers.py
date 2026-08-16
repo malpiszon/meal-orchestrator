@@ -4,7 +4,7 @@ from datetime import date
 from pathlib import Path
 
 from meal_orchestrator.config import AppConfig, UserConfig
-from meal_orchestrator.config.models import DeliveryConfig, LlmConfig, RuntimeConfig
+from meal_orchestrator.config.models import BatchConfig, DeliveryConfig, LlmConfig, RuntimeConfig
 from meal_orchestrator.domain import (
     CanonicalDay,
     CanonicalMeal,
@@ -22,7 +22,10 @@ from meal_orchestrator.domain import (
 
 
 def app_config(
-    *, fallback_models: list[str] | None = None, max_concurrent_users: int = 5
+    *,
+    fallback_models: list[str] | None = None,
+    max_concurrent_users: int = 5,
+    batch: BatchConfig | None = None,
 ) -> AppConfig:
     return AppConfig(
         runtime=RuntimeConfig(
@@ -35,6 +38,7 @@ def app_config(
             timeout_seconds=30,
             max_retries=1,
             fallback_models=fallback_models or [],
+            batch=batch or BatchConfig(),
         ),
         default_provider="example_provider",
         delivery=DeliveryConfig(

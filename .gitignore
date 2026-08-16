@@ -6,5 +6,6 @@ __pycache__/
 *.egg-info/
 data/
 .env
+.batch_state/
 config/*.local.yaml
 prompts/*.local.md
