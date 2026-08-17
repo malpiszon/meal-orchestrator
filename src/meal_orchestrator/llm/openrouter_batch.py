@@ -31,13 +31,8 @@ class BatchStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
-# Statuses that mean "still working" — keep polling.
 PENDING_STATUSES = frozenset(
     {BatchStatus.VALIDATING, BatchStatus.IN_PROGRESS, BatchStatus.FINALIZING}
-)
-# Statuses that mean "done, but not usably" — stop polling, fall back.
-TERMINAL_FAILURE_STATUSES = frozenset(
-    {BatchStatus.FAILED, BatchStatus.EXPIRED, BatchStatus.CANCELLED}
 )
 
 

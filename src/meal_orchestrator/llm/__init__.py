@@ -13,7 +13,6 @@ from meal_orchestrator.llm.openrouter import (
 )
 from meal_orchestrator.llm.openrouter_batch import (
     PENDING_STATUSES,
-    TERMINAL_FAILURE_STATUSES,
     BatchRequestRow,
     BatchRowError,
     BatchStatus,
@@ -25,7 +24,6 @@ from meal_orchestrator.llm.openrouter_batch import (
 
 __all__ = [
     "PENDING_STATUSES",
-    "TERMINAL_FAILURE_STATUSES",
     "BatchRequestRow",
     "BatchRowError",
     "BatchStatus",

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import date
 
+from meal_orchestrator.batch_coordinator import BatchCoordinator
 from meal_orchestrator.batch_runner import PendingBatchState, PendingBatchUser, save_state
 from meal_orchestrator.config import AppConfig
 from meal_orchestrator.config.models import BatchConfig
@@ -86,17 +87,17 @@ def test_batch_state_persists_through_delivery_not_cleared_before_it(tmp_path, m
             ],
         }
 
-    monkeypatch.setattr("meal_orchestrator.orchestrator.submit_batch", capturing_submit_batch)
-    monkeypatch.setattr("meal_orchestrator.orchestrator.get_batch", fake_get_batch)
+    monkeypatch.setattr("meal_orchestrator.batch_coordinator.submit_batch", capturing_submit_batch)
+    monkeypatch.setattr("meal_orchestrator.batch_coordinator.get_batch", fake_get_batch)
 
     state_existed_during_delivery = []
-    original_deliver = RunOrchestrator._deliver_batch_results
+    original_deliver = BatchCoordinator._deliver
 
     def spy_deliver(self, *args, **kwargs):
         state_existed_during_delivery.append(state_path.exists())
         return original_deliver(self, *args, **kwargs)
 
-    monkeypatch.setattr(RunOrchestrator, "_deliver_batch_results", spy_deliver)
+    monkeypatch.setattr(BatchCoordinator, "_deliver", spy_deliver)
 
     class UnusedLlmClient:
         def generate(self, request, **_kwargs):
@@ -156,8 +157,8 @@ def test_batch_mode_submits_polls_and_delivers(tmp_path, monkeypatch) -> None:
             ],
         }
 
-    monkeypatch.setattr("meal_orchestrator.orchestrator.submit_batch", fake_submit_batch)
-    monkeypatch.setattr("meal_orchestrator.orchestrator.get_batch", fake_get_batch)
+    monkeypatch.setattr("meal_orchestrator.batch_coordinator.submit_batch", fake_submit_batch)
+    monkeypatch.setattr("meal_orchestrator.batch_coordinator.get_batch", fake_get_batch)
 
     class UnusedLlmClient:
         def generate(self, request, **_kwargs):
@@ -198,8 +199,8 @@ def test_batch_mode_retries_row_failures_synchronously_with_fallback_models(
     def fake_get_batch(batch_id, **_kwargs):
         return {"status": "completed", "results": []}  # every row missing -> per-row error
 
-    monkeypatch.setattr("meal_orchestrator.orchestrator.submit_batch", fake_submit_batch)
-    monkeypatch.setattr("meal_orchestrator.orchestrator.get_batch", fake_get_batch)
+    monkeypatch.setattr("meal_orchestrator.batch_coordinator.submit_batch", fake_submit_batch)
+    monkeypatch.setattr("meal_orchestrator.batch_coordinator.get_batch", fake_get_batch)
 
     class FallbackOnlyLlmClient:
         """Only succeeds when called with the configured fallback model — proves
@@ -294,8 +295,8 @@ def test_batch_mode_single_row_failure_still_sends_aggregate_alert(tmp_path, mon
             ],
         }
 
-    monkeypatch.setattr("meal_orchestrator.orchestrator.submit_batch", capturing_submit_batch)
-    monkeypatch.setattr("meal_orchestrator.orchestrator.get_batch", fake_get_batch)
+    monkeypatch.setattr("meal_orchestrator.batch_coordinator.submit_batch", capturing_submit_batch)
+    monkeypatch.setattr("meal_orchestrator.batch_coordinator.get_batch", fake_get_batch)
 
     class SyncFallbackLlmClient:
         def generate(self, request, **_kwargs):
@@ -362,8 +363,8 @@ def test_batch_mode_no_aggregate_alert_when_every_row_succeeds(tmp_path, monkeyp
             ],
         }
 
-    monkeypatch.setattr("meal_orchestrator.orchestrator.submit_batch", capturing_submit_batch)
-    monkeypatch.setattr("meal_orchestrator.orchestrator.get_batch", fake_get_batch)
+    monkeypatch.setattr("meal_orchestrator.batch_coordinator.submit_batch", capturing_submit_batch)
+    monkeypatch.setattr("meal_orchestrator.batch_coordinator.get_batch", fake_get_batch)
 
     class UnusedLlmClient:
         def generate(self, request, **_kwargs):
@@ -395,9 +396,9 @@ def test_batch_mode_falls_back_to_sync_when_batch_times_out(tmp_path, monkeypatc
     def fake_submit_batch(rows, **_kwargs):
         return "batch-1"
 
-    monkeypatch.setattr("meal_orchestrator.orchestrator.submit_batch", fake_submit_batch)
+    monkeypatch.setattr("meal_orchestrator.batch_coordinator.submit_batch", fake_submit_batch)
     monkeypatch.setattr(
-        "meal_orchestrator.orchestrator.poll_until_terminal", lambda *a, **k: None
+        "meal_orchestrator.batch_coordinator.poll_until_terminal", lambda *a, **k: None
     )
 
     class SyncFallbackLlmClient:
@@ -460,7 +461,7 @@ def test_batch_resume_deadline_counts_from_original_submission_not_resume_time(
         get_batch_calls.append(batch_id)
         return {"status": "in_progress"}  # still pending, forever
 
-    monkeypatch.setattr("meal_orchestrator.orchestrator.get_batch", fake_get_batch)
+    monkeypatch.setattr("meal_orchestrator.batch_coordinator.get_batch", fake_get_batch)
 
     class SyncFallbackLlmClient:
         def generate(self, request, **_kwargs):
@@ -505,7 +506,7 @@ def test_batch_mode_resumes_pending_state_instead_of_resubmitting(tmp_path, monk
 
     submit_calls = []
     monkeypatch.setattr(
-        "meal_orchestrator.orchestrator.submit_batch",
+        "meal_orchestrator.batch_coordinator.submit_batch",
         lambda rows, **k: submit_calls.append(rows) or "should-not-be-called",
     )
 
@@ -537,7 +538,7 @@ def test_batch_mode_resumes_pending_state_instead_of_resubmitting(tmp_path, monk
             ],
         }
 
-    monkeypatch.setattr("meal_orchestrator.orchestrator.get_batch", fake_get_batch)
+    monkeypatch.setattr("meal_orchestrator.batch_coordinator.get_batch", fake_get_batch)
 
     class UnusedLlmClient:
         def generate(self, request, **_kwargs):
@@ -590,7 +591,7 @@ def test_batch_resume_warns_when_a_pending_user_was_removed_from_config(
     )
 
     monkeypatch.setattr(
-        "meal_orchestrator.orchestrator.submit_batch", lambda rows, **k: "should-not-be-called"
+        "meal_orchestrator.batch_coordinator.submit_batch", lambda rows, **k: "should-not-be-called"
     )
 
     def fake_get_batch(batch_id, **_kwargs):
@@ -620,7 +621,7 @@ def test_batch_resume_warns_when_a_pending_user_was_removed_from_config(
             ],
         }
 
-    monkeypatch.setattr("meal_orchestrator.orchestrator.get_batch", fake_get_batch)
+    monkeypatch.setattr("meal_orchestrator.batch_coordinator.get_batch", fake_get_batch)
 
     class UnusedLlmClient:
         def generate(self, request, **_kwargs):
@@ -653,7 +654,7 @@ def test_batch_mode_skipped_for_dry_run(tmp_path, monkeypatch) -> None:
     def fail_if_called(*args, **kwargs):
         raise AssertionError("batch client must not be used for dry runs")
 
-    monkeypatch.setattr("meal_orchestrator.orchestrator.submit_batch", fail_if_called)
+    monkeypatch.setattr("meal_orchestrator.batch_coordinator.submit_batch", fail_if_called)
 
     class SyncLlmClient:
         def generate(self, request, **_kwargs):

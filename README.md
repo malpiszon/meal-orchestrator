@@ -76,10 +76,14 @@ src/meal_orchestrator/
   cli.py            entrypoint: argument parsing, env var checks
   orchestrator.py    run-level orchestration: user selection, target week, sequential menu fetch then bounded-parallel remainder, operational notifications
   workflow.py         per-user workflow: fetch -> normalize -> prompt -> LLM -> email -> Discord
+  batch_coordinator.py OpenRouter batch subsystem: submit/resume, run lock, poll-with-timeout-fallback, per-row delivery
+  batch_runner.py       batch subsystem mechanism: durable pending-batch state, cross-process lock file, generic poll loop
+  worker_pool.py       generic bounded thread pool shared by the plain and batch delivery paths
+  ops_notifications.py formats and sends the per-user and capability-check-failure operational Discord notifications
   config/              YAML loading and config dataclasses
   domain/              shared dataclasses (canonical menu, requests/results, workflow status)
   providers/           provider adapters, one package per provider
-  llm/                 OpenRouter client, model capability check
+  llm/                 OpenRouter client, model capability check, OpenRouter batch API client (openrouter_batch.py)
   rendering/           renders a structured LLM assessment to plain text
   delivery/            Resend email client, Discord webhook client
   observability/       structured logging setup
@@ -227,6 +231,16 @@ auto-generated notes.
   workflow calls `OpenRouterClient` directly. OpenRouter already abstracts
   over multiple model providers, so the extra layer isn't worth it until
   batch/async execution is needed.
+- **Batch mechanism vs. policy, split across two files.** `batch_runner.py`
+  holds only durable-state I/O, cross-process locking, and a generic
+  poll-until-terminal loop — no OpenRouter or orchestration knowledge.
+  `batch_coordinator.py`'s `BatchCoordinator` owns the actual batch policy
+  (submit-or-resume, timeout fallback, per-row delivery/retry) and is a
+  collaborator `RunOrchestrator` delegates to once menus are fetched, the
+  same way it already delegates per-user work to `UserWorkflowExecutor`.
+  `worker_pool.py`'s `run_pool` is the bounded-thread-pool driver shared by
+  the plain and batch delivery paths, since both need identical "one result
+  per user, a worker exception becomes a FAILED result" semantics.
 - **Menu unavailability is an expected outcome, not an error.** It short-
   circuits a user's workflow (skip LLM/email, send a status notification)
   rather than failing the run.

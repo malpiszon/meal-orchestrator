@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import os
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import NamedTuple
 
 from meal_orchestrator import __version__
 from meal_orchestrator.artifacts import ArtifactStore, RunArtifacts
@@ -39,6 +42,7 @@ from meal_orchestrator.providers import (
 from meal_orchestrator.rendering.html import render_html
 from meal_orchestrator.rendering.labels import SUBJECT_EMOJI
 from meal_orchestrator.rendering.plain_text import render_plain_text
+from meal_orchestrator.worker_pool import run_pool
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +113,17 @@ class _MenuFetchOutcome:
     artifacts: RunArtifacts | None = None
     state: _WorkflowState | None = None
     log_context: dict | None = None
+
+
+class PendingUser(NamedTuple):
+    """A user whose menu was fetched successfully and is awaiting the second
+    (LLM/email/Discord) phase of the pipeline — synchronous or via batch.
+    """
+
+    executor: UserWorkflowExecutor
+    user: UserConfig
+    run_context: RunContext
+    outcome: _MenuFetchOutcome
 
 
 class UserWorkflowExecutor:
@@ -511,6 +526,41 @@ class UserWorkflowExecutor:
         if state.llm_failure is not None:
             metadata["llm_failure"] = state.llm_failure.to_metadata()
         artifacts.save_metadata(metadata)
+
+
+def process_pending_synchronously(
+    pending: dict[str, PendingUser],
+    max_concurrent_users: int,
+    run_id: str,
+    notify_ops: Callable[[str, WorkflowResult], None],
+) -> dict[str, WorkflowResult]:
+    """Run prompt -> LLM -> email -> Discord for every user whose menu was
+    fetched successfully, bounded by max_concurrent_users.
+
+    This is the "normal" (non-batch) remainder-of-pipeline path, and also
+    what batch processing falls back to for a whole run (batch unavailable/
+    timed out) or an individual row (batch row failed/missing).
+    """
+    work_items = {
+        user_id: functools.partial(
+            pending_user.executor.execute_from_menu,
+            pending_user.user,
+            pending_user.run_context,
+            pending_user.outcome.menu,
+            pending_user.outcome.artifacts,
+            pending_user.outcome.state,
+            pending_user.outcome.log_context,
+        )
+        for user_id, pending_user in pending.items()
+    }
+    return run_pool(
+        work_items,
+        max_concurrent_users,
+        thread_name_prefix="user-worker",
+        run_id=run_id,
+        notify_ops=notify_ops,
+        worker_label="user workflow worker",
+    )
 
 
 def _discord_enabled(run_context: RunContext, user: UserConfig) -> bool:

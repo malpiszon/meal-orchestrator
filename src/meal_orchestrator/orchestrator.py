@@ -3,52 +3,34 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Callable
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import NamedTuple, Protocol
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from meal_orchestrator.artifacts import ArtifactStore
-from meal_orchestrator.batch_runner import (
-    PendingBatchState,
-    PendingBatchUser,
-    acquire_lock,
-    clear_state,
-    load_state,
-    poll_until_terminal,
-    release_lock,
-    save_state,
-)
+from meal_orchestrator.batch_coordinator import BatchCoordinator
+from meal_orchestrator.batch_runner import PendingBatchState
 from meal_orchestrator.config import AppConfig, UserConfig
 from meal_orchestrator.delivery import DiscordClient, EmailClient, build_discord_client
-from meal_orchestrator.delivery.discord import COLOR_ERROR, COLOR_SUCCESS, COLOR_WARNING
 from meal_orchestrator.delivery.email import ResendEmailClient
 from meal_orchestrator.domain import (
-    DiscordMessage,
-    LlmResult,
     RunContext,
     WorkflowResult,
     WorkflowStatus,
     nearest_upcoming_monday,
     week_end_for,
 )
-from meal_orchestrator.llm import (
-    PENDING_STATUSES,
-    BatchRequestRow,
-    BatchRowError,
-    BatchStatus,
-    OpenRouterClient,
-    assert_structured_output_supported,
-    batch_status,
-    get_batch,
-    parse_batch_results,
-    submit_batch,
-)
+from meal_orchestrator.llm import OpenRouterClient, assert_structured_output_supported
+from meal_orchestrator.ops_notifications import build_ops_notifier, notify_capability_check_failed
 from meal_orchestrator.providers import ProviderAdapter, build_provider_adapter
-from meal_orchestrator.workflow import UserWorkflowExecutor
+from meal_orchestrator.workflow import (
+    PendingUser,
+    UserWorkflowExecutor,
+    process_pending_synchronously,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -77,16 +59,6 @@ class _RunClients(NamedTuple):
     artifact_store: ArtifactStore
 
 
-class _PendingUser(NamedTuple):
-    """A user whose menu was fetched successfully and is awaiting Phase B."""
-
-    executor: UserWorkflowExecutor
-    user: UserConfig
-    run_context: RunContext
-    # workflow._MenuFetchOutcome — private, not imported here.
-    outcome: object
-
-
 class RunOrchestrator:
     def __init__(
         self,
@@ -108,6 +80,7 @@ class RunOrchestrator:
         self.email_client_override = email_client
         self.discord_client_override = discord_client
         self.capability_check_override = capability_check
+        self.batch_coordinator = BatchCoordinator(app_config=app_config, project_root=project_root)
 
     def run(self, options: RunOptions) -> list[WorkflowResult]:
         batch_enabled = self.app_config.llm.batch.enabled and not options.dry_run
@@ -145,32 +118,30 @@ class RunOrchestrator:
             return capability_failures
 
         clients = self._build_shared_clients(discord_client, run_id)
-        notify_ops = self._build_ops_notifier(discord_client, model, run_id, options)
+        notify_ops = build_ops_notifier(
+            self.app_config, discord_client, model, run_id, dry_run=options.dry_run
+        )
 
         results_by_user_id, pending = self._fetch_menus_sequentially(
             selected_users, options, run_id, week_start, week_end, clients, notify_ops
         )
         if batch_enabled:
             results_by_user_id.update(
-                self._process_pending_via_batch(
+                self.batch_coordinator.submit_and_process(
                     pending,
-                    run_id,
-                    week_start,
-                    week_end,
-                    model,
-                    max_concurrent_users,
-                    notify_ops,
-                    discord_client,
-                    # api_key is only guaranteed on the real OpenRouterClient — duck-typed
-                    # test/custom llm_client implementations fall back to None, which the
-                    # batch client resolves from OPENROUTER_API_KEY itself (unchanged
-                    # behavior for anything that doesn't expose a configured key).
-                    self._llm_api_key(clients),
+                    run_id=run_id,
+                    week_start=week_start,
+                    week_end=week_end,
+                    model=model,
+                    max_concurrent_users=max_concurrent_users,
+                    notify_ops=notify_ops,
+                    discord_client=discord_client,
+                    api_key=self._llm_api_key(clients),
                 )
             )
         else:
             results_by_user_id.update(
-                self._process_pending_in_parallel(pending, max_concurrent_users, run_id, notify_ops)
+                process_pending_synchronously(pending, max_concurrent_users, run_id, notify_ops)
             )
         results = [results_by_user_id[user.id] for user in selected_users]
 
@@ -204,7 +175,7 @@ class RunOrchestrator:
                 exc_info=True,
                 extra={"run_id": run_id, "step": "capability_check"},
             )
-            _notify_capability_check_failed(
+            notify_capability_check_failed(
                 discord_client=discord_client,
                 app_config=self.app_config,
                 dry_run=options.dry_run,
@@ -246,37 +217,6 @@ class RunOrchestrator:
             artifact_store=artifact_store,
         )
 
-    def _build_ops_notifier(
-        self, discord_client: DiscordClient, model: str, run_id: str, options: RunOptions
-    ) -> Callable[[str, WorkflowResult], None]:
-        """Build a per-user callback that sends the operational Discord notification."""
-        ops_webhook = self.app_config.delivery.operational_discord_webhook_env
-
-        def _notify(user_id: str, result: WorkflowResult) -> None:
-            if options.dry_run or not ops_webhook:
-                return
-            if os.environ.get(ops_webhook):
-                _send_operational_notification(
-                    discord_client=discord_client,
-                    webhook_env=ops_webhook,
-                    user_id=user_id,
-                    run_id=run_id,
-                    result=result,
-                    expected_model=model,
-                )
-            else:
-                logger.info(
-                    "operational discord notification skipped: env var not set",
-                    extra={
-                        "run_id": run_id,
-                        "user_id": user_id,
-                        "step": "ops_notify",
-                        "webhook_env": ops_webhook,
-                    },
-                )
-
-        return _notify
-
     def _fetch_menus_sequentially(
         self,
         selected_users: list[UserConfig],
@@ -286,14 +226,14 @@ class RunOrchestrator:
         week_end: date,
         clients: _RunClients,
         notify_ops: Callable[[str, WorkflowResult], None],
-    ) -> tuple[dict[str, WorkflowResult], dict[str, _PendingUser]]:
+    ) -> tuple[dict[str, WorkflowResult], dict[str, PendingUser]]:
         """Fetch every user's menu one at a time.
 
         Never parallelized — concurrent requests to the menu provider risk
         looking like a burst/DOS as the number of users grows.
         """
         results_by_user_id: dict[str, WorkflowResult] = {}
-        pending: dict[str, _PendingUser] = {}
+        pending: dict[str, PendingUser] = {}
 
         for user in selected_users:
             provider_id = (
@@ -344,58 +284,9 @@ class RunOrchestrator:
                 results_by_user_id[user.id] = outcome.result
                 notify_ops(user.id, outcome.result)
             else:
-                pending[user.id] = _PendingUser(executor, user, run_context, outcome)
+                pending[user.id] = PendingUser(executor, user, run_context, outcome)
 
         return results_by_user_id, pending
-
-    def _process_pending_in_parallel(
-        self,
-        pending: dict[str, _PendingUser],
-        max_concurrent_users: int,
-        run_id: str,
-        notify_ops: Callable[[str, WorkflowResult], None],
-    ) -> dict[str, WorkflowResult]:
-        """Run prompt -> LLM -> email -> Discord for every user whose menu was
-        fetched successfully, bounded by max_concurrent_users.
-        """
-        results_by_user_id: dict[str, WorkflowResult] = {}
-        if not pending:
-            return results_by_user_id
-
-        max_workers = min(len(pending), max_concurrent_users)
-        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="user-worker") as pool:
-            future_to_user_id: dict[Future[WorkflowResult], str] = {}
-            for user_id, pending_user in pending.items():
-                future = pool.submit(
-                    pending_user.executor.execute_from_menu,
-                    pending_user.user,
-                    pending_user.run_context,
-                    pending_user.outcome.menu,
-                    pending_user.outcome.artifacts,
-                    pending_user.outcome.state,
-                    pending_user.outcome.log_context,
-                )
-                future_to_user_id[future] = user_id
-
-            for future in as_completed(future_to_user_id):
-                user_id = future_to_user_id[future]
-                try:
-                    result = future.result()
-                except Exception as exc:
-                    logger.exception(
-                        "user workflow worker failed unexpectedly",
-                        extra={"run_id": run_id, "user_id": user_id, "step": "failed"},
-                    )
-                    result = WorkflowResult(
-                        user_id=user_id,
-                        status=WorkflowStatus.FAILED,
-                        detail=str(exc),
-                        failed_step="worker",
-                    )
-                results_by_user_id[user_id] = result
-                notify_ops(user_id, result)
-
-        return results_by_user_id
 
     def _resume_pending_batch_if_any(self, options: RunOptions) -> list[WorkflowResult] | None:
         """Check for a batch submitted by a prior, crashed/restarted invocation.
@@ -403,7 +294,7 @@ class RunOrchestrator:
         Returns the resumed run's results if one was found, or None if there
         was nothing to resume (the caller should start a normal run).
         """
-        state = load_state(self.project_root)
+        state = self.batch_coordinator.find_pending_state()
         if state is None:
             return None
         logger.info(
@@ -412,9 +303,11 @@ class RunOrchestrator:
         )
 
         discord_client = self.discord_client_override or build_discord_client()
-        notify_ops = self._build_ops_notifier(discord_client, state.model, state.run_id, options)
+        notify_ops = build_ops_notifier(
+            self.app_config, discord_client, state.model, state.run_id, dry_run=options.dry_run
+        )
 
-        if not acquire_lock(self.project_root):
+        if not self.batch_coordinator.try_acquire_lock():
             logger.warning(
                 "batch resume skipped: another invocation already holds the run lock",
                 extra={"run_id": state.run_id, "step": "batch_resume"},
@@ -448,6 +341,32 @@ class RunOrchestrator:
         results_by_user_id, pending = self._fetch_menus_sequentially(
             selected_users, resume_options, state.run_id, week_start, week_end, clients, notify_ops
         )
+        self._warn_about_unresumable_users(state, users_by_id, pending)
+        try:
+            results_by_user_id.update(
+                self.batch_coordinator.resume(
+                    state,
+                    pending,
+                    max_concurrent_users=self._resolve_max_concurrent_users(options),
+                    notify_ops=notify_ops,
+                    discord_client=discord_client,
+                    api_key=self._llm_api_key(clients),
+                )
+            )
+        finally:
+            self.batch_coordinator.release_lock()
+        return [
+            results_by_user_id[user.id]
+            for user in selected_users
+            if user.id in results_by_user_id
+        ]
+
+    @staticmethod
+    def _warn_about_unresumable_users(
+        state: PendingBatchState,
+        users_by_id: dict[str, UserConfig],
+        pending: dict[str, PendingUser],
+    ) -> None:
         for pending_user in state.users:
             if pending_user.user_id not in users_by_id:
                 logger.warning(
@@ -473,287 +392,6 @@ class RunOrchestrator:
                         "step": "batch_resume",
                     },
                 )
-        try:
-            rows = self._build_batch_rows(pending, state.run_id)
-            results_by_user_id.update(
-                self._await_and_deliver_batch(
-                    state.batch_id,
-                    rows,
-                    pending,
-                    self._resolve_max_concurrent_users(options),
-                    state.run_id,
-                    notify_ops,
-                    discord_client,
-                    self._llm_api_key(clients),
-                    datetime.fromisoformat(state.submitted_at),
-                )
-            )
-        finally:
-            release_lock(self.project_root)
-        return [
-            results_by_user_id[user.id]
-            for user in selected_users
-            if user.id in results_by_user_id
-        ]
-
-    def _process_pending_via_batch(
-        self,
-        pending: dict[str, _PendingUser],
-        run_id: str,
-        week_start: date,
-        week_end: date,
-        model: str,
-        max_concurrent_users: int,
-        notify_ops: Callable[[str, WorkflowResult], None],
-        discord_client: DiscordClient,
-        api_key: str | None,
-    ) -> dict[str, WorkflowResult]:
-        """Submit every pending user's request as one OpenRouter batch, then
-        block (with exponential-backoff polling) until it completes or times
-        out. No second scheduled job is involved — this runs to completion
-        within the current invocation.
-        """
-        if not pending:
-            return {}
-        if not acquire_lock(self.project_root):
-            logger.warning(
-                "batch submission skipped: another invocation already holds the run lock; "
-                "falling back to synchronous processing",
-                extra={"run_id": run_id, "step": "batch_submit"},
-            )
-            self._notify_batch_fallback(
-                discord_client, run_id, "batch submission skipped: run lock already held"
-            )
-            return self._process_pending_in_parallel(
-                pending, max_concurrent_users, run_id, notify_ops
-            )
-        try:
-            rows = self._build_batch_rows(pending, run_id)
-            batch_id = submit_batch(rows, api_key=api_key)
-            submitted_at = datetime.now(UTC)
-            save_state(
-                self.project_root,
-                PendingBatchState(
-                    run_id=run_id,
-                    batch_id=batch_id,
-                    submitted_at=submitted_at.isoformat(),
-                    week_start=week_start.isoformat(),
-                    week_end=week_end.isoformat(),
-                    model=model,
-                    users=[
-                        PendingBatchUser(user_id=user_id, custom_id=f"{run_id}:{user_id}")
-                        for user_id in pending
-                    ],
-                ),
-            )
-            return self._await_and_deliver_batch(
-                batch_id,
-                rows,
-                pending,
-                max_concurrent_users,
-                run_id,
-                notify_ops,
-                discord_client,
-                api_key,
-                submitted_at,
-            )
-        finally:
-            release_lock(self.project_root)
-
-    def _build_batch_rows(
-        self, pending: dict[str, _PendingUser], run_id: str
-    ) -> list[BatchRequestRow]:
-        rows = []
-        for user_id, pending_user in pending.items():
-            llm_request = pending_user.executor.build_llm_request(
-                pending_user.user,
-                pending_user.run_context,
-                pending_user.outcome.menu,
-                pending_user.outcome.log_context,
-            )
-            pending_user.outcome.artifacts.save_llm_request(llm_request)
-            rows.append(
-                BatchRequestRow(
-                    custom_id=f"{run_id}:{user_id}",
-                    model=llm_request.model,
-                    payload=llm_request.payload,
-                )
-            )
-        return rows
-
-    def _await_and_deliver_batch(
-        self,
-        batch_id: str,
-        rows: list[BatchRequestRow],
-        pending: dict[str, _PendingUser],
-        max_concurrent_users: int,
-        run_id: str,
-        notify_ops: Callable[[str, WorkflowResult], None],
-        discord_client: DiscordClient,
-        api_key: str | None,
-        started_at: datetime,
-    ) -> dict[str, WorkflowResult]:
-        """`started_at` must be the batch's original submission time (not "now"),
-        so max_wait_hours bounds the total wait from submission — otherwise a
-        resumed batch (a fresh process, calling this again after a crash) would
-        silently reset the deadline to a full new max_wait_hours window instead
-        of continuing to count down from when the batch was actually submitted.
-        """
-        batch_config = self.app_config.llm.batch
-        data = poll_until_terminal(
-            batch_id,
-            batch_config,
-            get_batch=lambda bid: get_batch(bid, api_key=api_key),
-            is_pending=lambda d: batch_status(d) in PENDING_STATUSES,
-            started_at=started_at,
-        )
-
-        # State is kept alive through delivery (not cleared right after polling
-        # ends) so a crash during delivery can still resume — get_batch is a
-        # free re-check against an already-finished batch, and per-user email
-        # delivery is idempotent (same idempotency_key across a resumed run_id),
-        # so re-running delivery after a crash is safe, not just re-billable.
-        if data is None or batch_status(data) != BatchStatus.COMPLETED:
-            logger.warning(
-                "openrouter batch did not complete usably; falling back to synchronous "
-                "processing",
-                extra={
-                    "run_id": run_id,
-                    "batch_id": batch_id,
-                    "status": batch_status(data).value if data is not None else "timed_out",
-                    "step": "batch_fallback",
-                },
-            )
-            self._notify_batch_fallback(
-                discord_client, run_id, f"batch {batch_id} did not complete in time or failed"
-            )
-            results = self._process_pending_in_parallel(
-                pending, max_concurrent_users, run_id, notify_ops
-            )
-            clear_state(self.project_root)
-            return results
-
-        results, errors = parse_batch_results(rows, data)
-        delivered = self._deliver_batch_results(
-            results, errors, pending, max_concurrent_users, run_id, notify_ops, discord_client
-        )
-        clear_state(self.project_root)
-        return delivered
-
-    def _deliver_batch_results(
-        self,
-        results: dict[str, LlmResult],
-        errors: dict[str, BatchRowError],
-        pending: dict[str, _PendingUser],
-        max_concurrent_users: int,
-        run_id: str,
-        notify_ops: Callable[[str, WorkflowResult], None],
-        discord_client: DiscordClient,
-    ) -> dict[str, WorkflowResult]:
-        """Deliver every completed row, and retry every failed/missing row
-        synchronously (full retry + fallback_models + artifacts trail via
-        execute_from_menu) rather than marking it permanently FAILED — a
-        batch row failure gets the same resilience a sync-mode call would.
-        """
-        results_by_user_id: dict[str, WorkflowResult] = {}
-        if not pending:
-            return results_by_user_id
-
-        fallback_user_ids: list[str] = []
-        max_workers = min(len(pending), max_concurrent_users)
-        with ThreadPoolExecutor(
-            max_workers=max_workers, thread_name_prefix="batch-deliver"
-        ) as pool:
-            future_to_user_id: dict[Future[WorkflowResult], str] = {}
-            for user_id, pending_user in pending.items():
-                custom_id = f"{run_id}:{user_id}"
-                if custom_id in results:
-                    future = pool.submit(
-                        pending_user.executor.execute_from_llm_result,
-                        pending_user.user,
-                        pending_user.run_context,
-                        pending_user.outcome.menu,
-                        results[custom_id],
-                        pending_user.outcome.artifacts,
-                        pending_user.outcome.state,
-                        pending_user.outcome.log_context,
-                    )
-                else:
-                    fallback_user_ids.append(user_id)
-                    row_error = errors.get(custom_id)
-                    logger.warning(
-                        "batch row unusable for user=%s reason=%s; retrying synchronously",
-                        user_id,
-                        row_error.reason if row_error else "missing_from_batch",
-                        extra={"run_id": run_id, "user_id": user_id, "step": "batch_row_retry"},
-                    )
-                    future = pool.submit(
-                        pending_user.executor.execute_from_menu,
-                        pending_user.user,
-                        pending_user.run_context,
-                        pending_user.outcome.menu,
-                        pending_user.outcome.artifacts,
-                        pending_user.outcome.state,
-                        pending_user.outcome.log_context,
-                    )
-                future_to_user_id[future] = user_id
-
-            for future in as_completed(future_to_user_id):
-                user_id = future_to_user_id[future]
-                try:
-                    result = future.result()
-                except Exception as exc:
-                    logger.exception(
-                        "batch delivery worker failed unexpectedly",
-                        extra={"run_id": run_id, "user_id": user_id, "step": "failed"},
-                    )
-                    result = WorkflowResult(
-                        user_id=user_id,
-                        status=WorkflowStatus.FAILED,
-                        detail=str(exc),
-                        failed_step="worker",
-                    )
-                results_by_user_id[user_id] = result
-                notify_ops(user_id, result)
-
-        if fallback_user_ids:
-            # A handful of individual row failures is normal and already visible
-            # via the per-user ops notifications above — but a systemic problem
-            # with the batch (e.g. most/all rows failing) is easy to miss as a
-            # pattern buried in N separate messages, so it also gets one summary
-            # alert naming exactly who needed the synchronous fallback.
-            self._notify_batch_fallback(
-                discord_client,
-                run_id,
-                f"{len(fallback_user_ids)}/{len(pending)} batch rows required synchronous "
-                f"fallback (users: {', '.join(sorted(fallback_user_ids))})",
-            )
-
-        return results_by_user_id
-
-    def _notify_batch_fallback(
-        self, discord_client: DiscordClient, run_id: str, reason: str
-    ) -> None:
-        webhook_env = self.app_config.delivery.operational_discord_webhook_env
-        if not webhook_env or not os.environ.get(webhook_env):
-            return
-        try:
-            discord_client.notify(
-                DiscordMessage(
-                    webhook_env=webhook_env,
-                    title="Batch processing fell back to synchronous",
-                    description=(
-                        f"Run {run_id}: {reason}; falling back to synchronous per-user calls."
-                    ),
-                    color=COLOR_WARNING,
-                )
-            )
-        except Exception:
-            logger.warning(
-                "operational discord notification failed",
-                exc_info=True,
-                extra={"run_id": run_id, "step": "batch_fallback"},
-            )
 
     @staticmethod
     def _llm_api_key(clients: _RunClients) -> str | None:
@@ -783,101 +421,3 @@ class RunOrchestrator:
         if not selected:
             raise ValueError(f"enabled user not found: {user_id}")
         return selected
-
-
-def _build_ops_message(
-    webhook_env: str, user_id: str, run_id: str, result: WorkflowResult, expected_model: str
-) -> DiscordMessage:
-    if result.status == WorkflowStatus.COMPLETED:
-        run_note = _run_note(run_id, result.retry_count)
-        description = f"Workflow completed for user {user_id} {run_note}."
-        color = COLOR_SUCCESS
-        if result.model and result.model != expected_model:
-            description += (
-                f" Served by fallback model {result.model} (configured primary: {expected_model})."
-            )
-            color = COLOR_WARNING
-        return DiscordMessage(
-            webhook_env=webhook_env,
-            title="Workflow completed",
-            description=description,
-            color=color,
-        )
-    if result.status == WorkflowStatus.MENU_UNAVAILABLE:
-        detail = result.detail or "unknown reason"
-        return DiscordMessage(
-            webhook_env=webhook_env,
-            title="Menu unavailable",
-            description=f"Menu unavailable for user {user_id} (run {run_id}): {detail}",
-            color=COLOR_WARNING,
-        )
-    failed_step = result.failed_step or "unknown"
-    return DiscordMessage(
-        webhook_env=webhook_env,
-        title="Workflow failed",
-        description=(
-            f"Workflow failed for user {user_id} (run {run_id}) at step {failed_step}: "
-            # The underlying error message already states the attempt count
-            # (e.g. "failed after 3 attempt(s)"), so no separate retry note here.
-            f"{result.detail or 'unknown error'}"
-        ),
-        color=COLOR_ERROR,
-    )
-
-
-def _run_note(run_id: str, retry_count: int | None) -> str:
-    if not retry_count:
-        return f"(run {run_id})"
-    return f"(run {run_id}, {retry_count} retr{'y' if retry_count == 1 else 'ies'})"
-
-
-def _notify_capability_check_failed(
-    *,
-    discord_client: DiscordClient,
-    app_config: AppConfig,
-    dry_run: bool,
-    run_id: str,
-    model: str,
-    error: Exception,
-) -> None:
-    webhook_env = app_config.delivery.operational_discord_webhook_env
-    if dry_run or not webhook_env or not os.environ.get(webhook_env):
-        return
-    try:
-        discord_client.notify(
-            DiscordMessage(
-                webhook_env=webhook_env,
-                title="Workflow aborted",
-                description=(
-                    f"Capability check failed for model {model} (run {run_id}): {error}"
-                ),
-                color=COLOR_ERROR,
-            )
-        )
-    except Exception:
-        logger.warning(
-            "operational discord notification failed",
-            exc_info=True,
-            extra={"run_id": run_id, "step": "capability_check"},
-        )
-
-
-def _send_operational_notification(
-    *,
-    discord_client: DiscordClient,
-    webhook_env: str,
-    user_id: str,
-    run_id: str,
-    result: WorkflowResult,
-    expected_model: str,
-) -> None:
-    try:
-        discord_client.notify(
-            _build_ops_message(webhook_env, user_id, run_id, result, expected_model)
-        )
-    except Exception:
-        logger.warning(
-            "operational discord notification failed",
-            exc_info=True,
-            extra={"run_id": run_id, "user_id": user_id, "step": "ops_notify"},
-        )
