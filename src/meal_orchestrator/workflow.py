@@ -5,7 +5,6 @@ import json
 import logging
 import os
 import threading
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -42,7 +41,7 @@ from meal_orchestrator.providers import (
 from meal_orchestrator.rendering.html import render_html
 from meal_orchestrator.rendering.labels import SUBJECT_EMOJI
 from meal_orchestrator.rendering.plain_text import render_plain_text
-from meal_orchestrator.worker_pool import run_pool
+from meal_orchestrator.worker_pool import NotifyOps, run_pool
 
 logger = logging.getLogger(__name__)
 
@@ -532,7 +531,7 @@ def process_pending_synchronously(
     pending: dict[str, PendingUser],
     max_concurrent_users: int,
     run_id: str,
-    notify_ops: Callable[[str, WorkflowResult], None],
+    notify_ops: NotifyOps,
 ) -> dict[str, WorkflowResult]:
     """Run prompt -> LLM -> email -> Discord for every user whose menu was
     fetched successfully, bounded by max_concurrent_users.
@@ -556,7 +555,6 @@ def process_pending_synchronously(
     return run_pool(
         work_items,
         max_concurrent_users,
-        thread_name_prefix="user-worker",
         run_id=run_id,
         notify_ops=notify_ops,
         worker_label="user workflow worker",

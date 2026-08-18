@@ -2,14 +2,34 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Callable
 
 from meal_orchestrator.config import AppConfig
 from meal_orchestrator.delivery import DiscordClient
 from meal_orchestrator.delivery.discord import COLOR_ERROR, COLOR_SUCCESS, COLOR_WARNING
 from meal_orchestrator.domain import DiscordMessage, WorkflowResult, WorkflowStatus
+from meal_orchestrator.worker_pool import NotifyOps
 
 logger = logging.getLogger(__name__)
+
+
+def notify_safely(
+    discord_client: DiscordClient,
+    message: DiscordMessage,
+    *,
+    run_id: str,
+    step: str,
+    user_id: str | None = None,
+) -> None:
+    """Send `message`, logging (not raising) on failure — an operational
+    notification must never fail the run it's reporting on.
+    """
+    try:
+        discord_client.notify(message)
+    except Exception:
+        extra = {"run_id": run_id, "step": step}
+        if user_id is not None:
+            extra["user_id"] = user_id
+        logger.warning("operational discord notification failed", exc_info=True, extra=extra)
 
 
 def build_ops_notifier(
@@ -19,7 +39,7 @@ def build_ops_notifier(
     run_id: str,
     *,
     dry_run: bool,
-) -> Callable[[str, WorkflowResult], None]:
+) -> NotifyOps:
     """Build a per-user callback that sends the operational Discord notification
     summarizing that user's workflow outcome — a no-op if dry-run or no
     operational webhook is configured/set.
@@ -30,7 +50,13 @@ def build_ops_notifier(
         if dry_run or not ops_webhook:
             return
         if os.environ.get(ops_webhook):
-            _send(discord_client, ops_webhook, user_id, run_id, result, model)
+            notify_safely(
+                discord_client,
+                _build_message(ops_webhook, user_id, run_id, result, model),
+                run_id=run_id,
+                step="ops_notify",
+                user_id=user_id,
+            )
         else:
             logger.info(
                 "operational discord notification skipped: env var not set",
@@ -57,41 +83,17 @@ def notify_capability_check_failed(
     webhook_env = app_config.delivery.operational_discord_webhook_env
     if dry_run or not webhook_env or not os.environ.get(webhook_env):
         return
-    try:
-        discord_client.notify(
-            DiscordMessage(
-                webhook_env=webhook_env,
-                title="Workflow aborted",
-                description=(
-                    f"Capability check failed for model {model} (run {run_id}): {error}"
-                ),
-                color=COLOR_ERROR,
-            )
-        )
-    except Exception:
-        logger.warning(
-            "operational discord notification failed",
-            exc_info=True,
-            extra={"run_id": run_id, "step": "capability_check"},
-        )
-
-
-def _send(
-    discord_client: DiscordClient,
-    webhook_env: str,
-    user_id: str,
-    run_id: str,
-    result: WorkflowResult,
-    expected_model: str,
-) -> None:
-    try:
-        discord_client.notify(_build_message(webhook_env, user_id, run_id, result, expected_model))
-    except Exception:
-        logger.warning(
-            "operational discord notification failed",
-            exc_info=True,
-            extra={"run_id": run_id, "user_id": user_id, "step": "ops_notify"},
-        )
+    notify_safely(
+        discord_client,
+        DiscordMessage(
+            webhook_env=webhook_env,
+            title="Workflow aborted",
+            description=f"Capability check failed for model {model} (run {run_id}): {error}",
+            color=COLOR_ERROR,
+        ),
+        run_id=run_id,
+        step="capability_check",
+    )
 
 
 def _build_message(

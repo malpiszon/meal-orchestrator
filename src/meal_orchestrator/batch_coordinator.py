@@ -3,7 +3,6 @@ from __future__ import annotations
 import functools
 import logging
 import os
-from collections.abc import Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -31,12 +30,11 @@ from meal_orchestrator.llm import (
     parse_batch_results,
     submit_batch,
 )
-from meal_orchestrator.worker_pool import run_pool
+from meal_orchestrator.ops_notifications import notify_safely
+from meal_orchestrator.worker_pool import NotifyOps, run_pool
 from meal_orchestrator.workflow import PendingUser, process_pending_synchronously
 
 logger = logging.getLogger(__name__)
-
-NotifyOps = Callable[[str, WorkflowResult], None]
 
 
 class BatchCoordinator:
@@ -108,7 +106,9 @@ class BatchCoordinator:
                     week_end=week_end.isoformat(),
                     model=model,
                     users=[
-                        PendingBatchUser(user_id=user_id, custom_id=f"{run_id}:{user_id}")
+                        PendingBatchUser(
+                            user_id=user_id, custom_id=self._custom_id(run_id, user_id)
+                        )
                         for user_id in pending
                     ],
                 ),
@@ -117,12 +117,12 @@ class BatchCoordinator:
                 batch_id,
                 rows,
                 pending,
-                max_concurrent_users,
-                run_id,
-                notify_ops,
-                discord_client,
-                api_key,
-                submitted_at,
+                max_concurrent_users=max_concurrent_users,
+                run_id=run_id,
+                notify_ops=notify_ops,
+                discord_client=discord_client,
+                api_key=api_key,
+                started_at=submitted_at,
             )
         finally:
             self.release_lock()
@@ -146,12 +146,12 @@ class BatchCoordinator:
             state.batch_id,
             rows,
             pending,
-            max_concurrent_users,
-            state.run_id,
-            notify_ops,
-            discord_client,
-            api_key,
-            datetime.fromisoformat(state.submitted_at),
+            max_concurrent_users=max_concurrent_users,
+            run_id=state.run_id,
+            notify_ops=notify_ops,
+            discord_client=discord_client,
+            api_key=api_key,
+            started_at=datetime.fromisoformat(state.submitted_at),
         )
 
     def _build_rows(
@@ -168,18 +168,27 @@ class BatchCoordinator:
             pending_user.outcome.artifacts.save_llm_request(llm_request)
             rows.append(
                 BatchRequestRow(
-                    custom_id=f"{run_id}:{user_id}",
+                    custom_id=self._custom_id(run_id, user_id),
                     model=llm_request.model,
                     payload=llm_request.payload,
                 )
             )
         return rows
 
+    @staticmethod
+    def _custom_id(run_id: str, user_id: str) -> str:
+        """The batch row id used both when submitting (as `custom_id` in the
+        request) and when matching results back (`parse_batch_results`,
+        `_deliver`) — must stay identical across both, hence one definition.
+        """
+        return f"{run_id}:{user_id}"
+
     def _await_and_deliver(
         self,
         batch_id: str,
         rows: list[BatchRequestRow],
         pending: dict[str, PendingUser],
+        *,
         max_concurrent_users: int,
         run_id: str,
         notify_ops: NotifyOps,
@@ -255,7 +264,7 @@ class BatchCoordinator:
         fallback_user_ids: list[str] = []
         work_items = {}
         for user_id, pending_user in pending.items():
-            custom_id = f"{run_id}:{user_id}"
+            custom_id = self._custom_id(run_id, user_id)
             if custom_id in results:
                 work_items[user_id] = functools.partial(
                     pending_user.executor.execute_from_llm_result,
@@ -289,7 +298,6 @@ class BatchCoordinator:
         results_by_user_id = run_pool(
             work_items,
             max_concurrent_users,
-            thread_name_prefix="batch-deliver",
             run_id=run_id,
             notify_ops=notify_ops,
             worker_label="batch delivery worker",
@@ -314,20 +322,16 @@ class BatchCoordinator:
         webhook_env = self.app_config.delivery.operational_discord_webhook_env
         if not webhook_env or not os.environ.get(webhook_env):
             return
-        try:
-            discord_client.notify(
-                DiscordMessage(
-                    webhook_env=webhook_env,
-                    title="Batch processing fell back to synchronous",
-                    description=(
-                        f"Run {run_id}: {reason}; falling back to synchronous per-user calls."
-                    ),
-                    color=COLOR_WARNING,
-                )
-            )
-        except Exception:
-            logger.warning(
-                "operational discord notification failed",
-                exc_info=True,
-                extra={"run_id": run_id, "step": "batch_fallback"},
-            )
+        notify_safely(
+            discord_client,
+            DiscordMessage(
+                webhook_env=webhook_env,
+                title="Batch processing fell back to synchronous",
+                description=(
+                    f"Run {run_id}: {reason}; falling back to synchronous per-user calls."
+                ),
+                color=COLOR_WARNING,
+            ),
+            run_id=run_id,
+            step="batch_fallback",
+        )

@@ -231,7 +231,7 @@ auto-generated notes.
   workflow calls `OpenRouterClient` directly. OpenRouter already abstracts
   over multiple model providers, so the extra layer isn't worth it until
   batch/async execution is needed.
-- **Batch mechanism vs. policy, split across two files.** `batch_runner.py`
+- **Batch mechanism vs. policy, split across three files.** `batch_runner.py`
   holds only durable-state I/O, cross-process locking, and a generic
   poll-until-terminal loop — no OpenRouter or orchestration knowledge.
   `batch_coordinator.py`'s `BatchCoordinator` owns the actual batch policy

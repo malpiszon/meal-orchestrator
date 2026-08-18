@@ -8,14 +8,15 @@ from meal_orchestrator.domain import WorkflowResult, WorkflowStatus
 
 logger = logging.getLogger(__name__)
 
+NotifyOps = Callable[[str, WorkflowResult], None]
+
 
 def run_pool(
     work_items: dict[str, Callable[[], WorkflowResult]],
     max_workers: int,
     *,
-    thread_name_prefix: str,
     run_id: str,
-    notify_ops: Callable[[str, WorkflowResult], None],
+    notify_ops: NotifyOps,
     worker_label: str,
 ) -> dict[str, WorkflowResult]:
     """Run every `work_items[user_id]` callable on a thread pool, collecting one
@@ -32,6 +33,7 @@ def run_pool(
         return results_by_user_id
 
     workers = min(len(work_items), max_workers)
+    thread_name_prefix = worker_label.replace(" ", "-")
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix=thread_name_prefix) as pool:
         future_to_user_id: dict[Future[WorkflowResult], str] = {}
         for user_id, work in work_items.items():

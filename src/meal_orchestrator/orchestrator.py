@@ -26,6 +26,7 @@ from meal_orchestrator.domain import (
 from meal_orchestrator.llm import OpenRouterClient, assert_structured_output_supported
 from meal_orchestrator.ops_notifications import build_ops_notifier, notify_capability_check_failed
 from meal_orchestrator.providers import ProviderAdapter, build_provider_adapter
+from meal_orchestrator.worker_pool import NotifyOps
 from meal_orchestrator.workflow import (
     PendingUser,
     UserWorkflowExecutor,
@@ -225,7 +226,7 @@ class RunOrchestrator:
         week_start: date,
         week_end: date,
         clients: _RunClients,
-        notify_ops: Callable[[str, WorkflowResult], None],
+        notify_ops: NotifyOps,
     ) -> tuple[dict[str, WorkflowResult], dict[str, PendingUser]]:
         """Fetch every user's menu one at a time.
 
