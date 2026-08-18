@@ -731,6 +731,89 @@ def test_batch_mode_resumes_pending_state_instead_of_resubmitting(tmp_path, monk
     assert not (tmp_path / "batch_state" / "pending_batch.json").exists()
 
 
+def test_batch_resume_saves_raw_batch_result_as_artifact(tmp_path, monkeypatch) -> None:
+    """The artifact_store=... wiring added to submit_and_process must also
+    reach the resume path — resume() calls the same _await_and_deliver, so a
+    resumed batch's raw response should be saved exactly like a fresh one.
+    """
+    from meal_orchestrator.config.models import ArtifactConfig
+
+    users = [_user(tmp_path, "alan")]
+    save_state(
+        tmp_path / "batch_state",
+        PendingBatchState(
+            run_id="run-resume",
+            batch_id="batch-existing",
+            submitted_at="2026-06-01T00:00:00+00:00",
+            week_start="2026-06-01",
+            week_end="2026-06-05",
+            model="test-model",
+            users=[PendingBatchUser(user_id="alan", custom_id="run-resume:alan")],
+        ),
+    )
+
+    monkeypatch.setattr(
+        "meal_orchestrator.batch_coordinator.submit_batch",
+        lambda rows, **k: "should-not-be-called",
+    )
+
+    def fake_get_batch(batch_id, **_kwargs):
+        return {
+            "status": "completed",
+            "usage": {"prompt_tokens": 10, "completion_tokens": 20, "cost": 0.000567},
+            "results": [
+                {
+                    "custom_id": "run-resume:alan",
+                    "response": {
+                        "status_code": 200,
+                        "body": {
+                            "model": "test-model",
+                            "choices": [
+                                {
+                                    "message": {
+                                        "content": week_assessment(
+                                            canonical_menu()
+                                        ).model_dump_json()
+                                    }
+                                }
+                            ],
+                            "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+                        },
+                    },
+                    "error": None,
+                }
+            ],
+        }
+
+    monkeypatch.setattr("meal_orchestrator.batch_coordinator.get_batch", fake_get_batch)
+
+    class UnusedLlmClient:
+        def generate(self, request, **_kwargs):
+            raise AssertionError("synchronous LLM client must not be used on batch resume")
+
+    orchestrator = RunOrchestrator(
+        app_config=app_config(
+            batch=BatchConfig(enabled=True, state_dir=tmp_path / "batch_state"),
+            artifacts=ArtifactConfig(
+                path=tmp_path / "artifacts", retention_days=14, max_runs_per_user=10
+            ),
+        ),
+        users=users,
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=UnusedLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=FakeDiscordClient(),
+        capability_check=_no_capability_check,
+    )
+
+    results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert results[0].status == WorkflowStatus.COMPLETED
+    saved = json.loads((tmp_path / "artifacts" / "batches" / "run-resume.json").read_text())
+    assert saved["usage"]["cost"] == 0.000567
+
+
 def test_batch_resume_warns_when_a_pending_user_was_removed_from_config(
     tmp_path, monkeypatch, caplog
 ) -> None:
