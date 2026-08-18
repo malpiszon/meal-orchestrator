@@ -36,4 +36,4 @@ artifacts:
   enabled: true
   path: "/data/artifacts"
   retention_days: 14
-  max_runs_per_user: 10
+  max_runs: 10

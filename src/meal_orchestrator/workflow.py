@@ -284,8 +284,9 @@ class UserWorkflowExecutor:
         no `total_cost`, and `token_usage` here never carries a `cost` key either.
         That's not an oversight: OpenRouter only reports cost once per batch,
         aggregated across every row (see ArtifactStore.save_batch_result /
-        artifacts/batches/<run_id>.json), not per row, so there's no real
-        per-row figure to attribute here.
+        <run_id>/batch_result.json, and the aggregate usage folded into
+        <run_id>/metadata.json by BatchCoordinator), not per row, so there's
+        no real per-row figure to attribute here.
         """
         log_context = {**log_context, "worker": threading.current_thread().name}
         try:

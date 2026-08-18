@@ -146,13 +146,13 @@ def _parse_artifacts(data: dict[str, Any]) -> ArtifactConfig | None:
     retention_days = raw.get("retention_days")
     if not isinstance(retention_days, int) or retention_days < 1:
         raise ConfigError("artifacts.retention_days must be a positive integer")
-    max_runs = raw.get("max_runs_per_user")
+    max_runs = raw.get("max_runs")
     if not isinstance(max_runs, int) or max_runs < 1:
-        raise ConfigError("artifacts.max_runs_per_user must be a positive integer")
+        raise ConfigError("artifacts.max_runs must be a positive integer")
     return ArtifactConfig(
         path=Path(str(path_raw)),
         retention_days=retention_days,
-        max_runs_per_user=max_runs,
+        max_runs=max_runs,
     )
 
 

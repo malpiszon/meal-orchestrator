@@ -379,7 +379,7 @@ def test_artifacts_written_on_successful_run(tmp_path: Path) -> None:
     prompt_file.write_text("Choose meals.", encoding="utf-8")
     artifacts_dir = tmp_path / "artifacts"
     store = ArtifactStore(
-        ArtifactConfig(path=artifacts_dir, retention_days=14, max_runs_per_user=10)
+        ArtifactConfig(path=artifacts_dir, retention_days=14, max_runs=10)
     )
 
     executor = _executor(
@@ -387,7 +387,7 @@ def test_artifacts_written_on_successful_run(tmp_path: Path) -> None:
     )
     executor.execute(user_config(prompt_file.relative_to(tmp_path)), _context(dry_run=False))
 
-    run_dir = artifacts_dir / "alan" / "run-1"
+    run_dir = artifacts_dir / "run-1" / "alan"
     assert (run_dir / "provider_raw.json").exists()
     assert (run_dir / "canonical_menu.json").exists()
     assert (run_dir / "llm_request.json").exists()
@@ -414,7 +414,7 @@ def test_llm_artifacts_saved_on_dry_run(tmp_path: Path) -> None:
     prompt_file.write_text("Choose meals.", encoding="utf-8")
     artifacts_dir = tmp_path / "artifacts"
     store = ArtifactStore(
-        ArtifactConfig(path=artifacts_dir, retention_days=14, max_runs_per_user=10)
+        ArtifactConfig(path=artifacts_dir, retention_days=14, max_runs=10)
     )
 
     executor = _executor(
@@ -422,7 +422,7 @@ def test_llm_artifacts_saved_on_dry_run(tmp_path: Path) -> None:
     )
     executor.execute(user_config(prompt_file.relative_to(tmp_path)), _context(dry_run=True))
 
-    run_dir = artifacts_dir / "alan" / "run-1"
+    run_dir = artifacts_dir / "run-1" / "alan"
     assert (run_dir / "llm_request.json").exists()
     assert (run_dir / "llm_response.json").exists()
     metadata = json.loads((run_dir / "metadata.json").read_text())
@@ -434,7 +434,7 @@ def test_llm_attempts_summary_aggregates_fallback_attempts(tmp_path: Path) -> No
     prompt_file.write_text("Choose meals.", encoding="utf-8")
     artifacts_dir = tmp_path / "artifacts"
     store = ArtifactStore(
-        ArtifactConfig(path=artifacts_dir, retention_days=14, max_runs_per_user=10)
+        ArtifactConfig(path=artifacts_dir, retention_days=14, max_runs=10)
     )
 
     executor = _executor(
@@ -447,7 +447,7 @@ def test_llm_attempts_summary_aggregates_fallback_attempts(tmp_path: Path) -> No
     )
     executor.execute(user_config(prompt_file.relative_to(tmp_path)), _context(dry_run=False))
 
-    metadata = json.loads((artifacts_dir / "alan" / "run-1" / "metadata.json").read_text())
+    metadata = json.loads((artifacts_dir / "run-1" / "alan" / "metadata.json").read_text())
     summary = metadata["llm_attempts_summary"]
     assert summary["total_attempts"] == 4
     assert summary["models_tried"] == ["openai/gpt-5-mini", "google/gemini-3.1-flash-lite"]
@@ -461,7 +461,7 @@ def test_llm_attempts_summary_present_when_all_candidates_exhausted(tmp_path: Pa
     prompt_file.write_text("Choose meals.", encoding="utf-8")
     artifacts_dir = tmp_path / "artifacts"
     store = ArtifactStore(
-        ArtifactConfig(path=artifacts_dir, retention_days=14, max_runs_per_user=10)
+        ArtifactConfig(path=artifacts_dir, retention_days=14, max_runs=10)
     )
 
     executor = _executor(
@@ -477,7 +477,7 @@ def test_llm_attempts_summary_present_when_all_candidates_exhausted(tmp_path: Pa
     )
 
     assert result.status == WorkflowStatus.FAILED
-    metadata = json.loads((artifacts_dir / "alan" / "run-1" / "metadata.json").read_text())
+    metadata = json.loads((artifacts_dir / "run-1" / "alan" / "metadata.json").read_text())
     summary = metadata["llm_attempts_summary"]
     assert summary["total_attempts"] == 2
     assert summary["models_tried"] == ["openai/gpt-5-mini"]
@@ -491,7 +491,7 @@ def test_metadata_written_on_failed_run(tmp_path: Path) -> None:
     prompt_file.write_text("Choose meals.", encoding="utf-8")
     artifacts_dir = tmp_path / "artifacts"
     store = ArtifactStore(
-        ArtifactConfig(path=artifacts_dir, retention_days=14, max_runs_per_user=10)
+        ArtifactConfig(path=artifacts_dir, retention_days=14, max_runs=10)
     )
 
     executor = _executor(
@@ -504,7 +504,7 @@ def test_metadata_written_on_failed_run(tmp_path: Path) -> None:
     )
     executor.execute(user_config(prompt_file.relative_to(tmp_path)), _context(dry_run=False))
 
-    run_dir = artifacts_dir / "alan" / "run-1"
+    run_dir = artifacts_dir / "run-1" / "alan"
     assert (run_dir / "canonical_menu.json").exists()
     metadata = json.loads((run_dir / "metadata.json").read_text())
     assert metadata["status"] == "menu_unavailable"
@@ -515,7 +515,7 @@ def test_llm_failure_skips_delivery_and_records_failed_step(tmp_path: Path) -> N
     prompt_file.write_text("Choose meals.", encoding="utf-8")
     artifacts_dir = tmp_path / "artifacts"
     store = ArtifactStore(
-        ArtifactConfig(path=artifacts_dir, retention_days=14, max_runs_per_user=10)
+        ArtifactConfig(path=artifacts_dir, retention_days=14, max_runs=10)
     )
     email = FakeEmailClient()
 
@@ -528,10 +528,10 @@ def test_llm_failure_skips_delivery_and_records_failed_step(tmp_path: Path) -> N
     assert result.failed_step == "llm"
     assert result.retry_count == 2
     assert email.messages == []
-    metadata = json.loads((artifacts_dir / "example" / "run-1" / "metadata.json").read_text())
+    metadata = json.loads((artifacts_dir / "run-1" / "example" / "metadata.json").read_text())
     assert metadata["failed_step"] == "llm"
     assert metadata["llm_failure"]["generation_id"] == "gen-example"
-    assert not (artifacts_dir / "example" / "run-1" / "llm_failure.json").exists()
+    assert not (artifacts_dir / "run-1" / "example" / "llm_failure.json").exists()
 
 
 def test_discord_skipped_when_discord_user_id_is_none(tmp_path) -> None:
@@ -605,7 +605,7 @@ def test_normalization_error_saves_provider_raw_artifact(tmp_path: Path) -> None
     prompt_file.write_text("Choose meals.", encoding="utf-8")
     artifacts_dir = tmp_path / "artifacts"
     store = ArtifactStore(
-        ArtifactConfig(path=artifacts_dir, retention_days=14, max_runs_per_user=10)
+        ArtifactConfig(path=artifacts_dir, retention_days=14, max_runs=10)
     )
 
     executor = _executor(
@@ -618,7 +618,7 @@ def test_normalization_error_saves_provider_raw_artifact(tmp_path: Path) -> None
     )
     executor.execute(user_config(PathLikePrompt(prompt_file, tmp_path)), _context(dry_run=False))
 
-    run_dir = artifacts_dir / "alan" / "run-1"
+    run_dir = artifacts_dir / "run-1" / "alan"
     assert (run_dir / "provider_raw.json").exists()
     raw = json.loads((run_dir / "provider_raw.json").read_text())
     assert raw == {"raw": "data from api"}

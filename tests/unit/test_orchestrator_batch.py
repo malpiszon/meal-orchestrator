@@ -254,7 +254,7 @@ def test_batch_mode_saves_raw_batch_result_as_artifact_not_just_a_log_line(
                 initial_poll_interval_seconds=0,
             ),
             artifacts=ArtifactConfig(
-                path=tmp_path / "artifacts", retention_days=14, max_runs_per_user=10
+                path=tmp_path / "artifacts", retention_days=14, max_runs=10
             ),
         ),
         users=users,
@@ -269,11 +269,17 @@ def test_batch_mode_saves_raw_batch_result_as_artifact_not_just_a_log_line(
     results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
 
     assert results[0].status == WorkflowStatus.COMPLETED
-    batch_files = list((tmp_path / "artifacts" / "batches").iterdir())
-    assert len(batch_files) == 1  # one file per run
-    saved = json.loads(batch_files[0].read_text())
+    run_dirs = [
+        d for d in (tmp_path / "artifacts").iterdir() if d.is_dir()
+    ]
+    assert len(run_dirs) == 1  # one directory per run
+    saved = json.loads((run_dirs[0] / "batch_result.json").read_text())
     assert saved["usage"]["cost"] == 0.001234
     assert saved["results"][0]["custom_id"].endswith(":alan")
+
+    run_metadata = json.loads((run_dirs[0] / "metadata.json").read_text())
+    assert run_metadata["mode"] == "batch"
+    assert run_metadata["aggregate_usage"]["cost"] == 0.001234
 
 
 def test_batch_mode_status_check_log_is_small_not_the_full_response(
@@ -795,7 +801,7 @@ def test_batch_resume_saves_raw_batch_result_as_artifact(tmp_path, monkeypatch) 
         app_config=app_config(
             batch=BatchConfig(enabled=True, state_dir=tmp_path / "batch_state"),
             artifacts=ArtifactConfig(
-                path=tmp_path / "artifacts", retention_days=14, max_runs_per_user=10
+                path=tmp_path / "artifacts", retention_days=14, max_runs=10
             ),
         ),
         users=users,
@@ -810,8 +816,14 @@ def test_batch_resume_saves_raw_batch_result_as_artifact(tmp_path, monkeypatch) 
     results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
 
     assert results[0].status == WorkflowStatus.COMPLETED
-    saved = json.loads((tmp_path / "artifacts" / "batches" / "run-resume.json").read_text())
+    saved = json.loads(
+        (tmp_path / "artifacts" / "run-resume" / "batch_result.json").read_text()
+    )
     assert saved["usage"]["cost"] == 0.000567
+    run_metadata = json.loads(
+        (tmp_path / "artifacts" / "run-resume" / "metadata.json").read_text()
+    )
+    assert run_metadata["aggregate_usage"]["cost"] == 0.000567
 
 
 def test_batch_resume_warns_when_a_pending_user_was_removed_from_config(

@@ -63,14 +63,18 @@ notification is sent instead of treating it as an error.
   operational), both optional and independently configurable.
 - `--dry-run` mode that runs the full pipeline (including the LLM call)
   without sending email or Discord messages.
-- Per-run debug artifacts (raw provider response, canonical menu, LLM
-  request/response, per-attempt LLM trail including rejected attempts, run
-  metadata including LLM diagnostics and the failed step) with
-  retention-based cleanup. When batch mode is used, the raw OpenRouter batch
-  response (aggregate cost/usage, every row's output) is saved once per run
-  under `artifacts/batches/` rather than logged, pruned by `retention_days`
-  like everything else but with no `max_runs_per_user`-style count (these
-  are one file per run, not per-user).
+- Debug artifacts under `artifacts/<run_id>/`, one directory per run: a
+  run-level `metadata.json` (mode, week, participating users, and — for
+  batch runs — the batch id/status and OpenRouter's aggregate cost/usage,
+  since OpenRouter only ever reports cost once per batch, not per row), plus
+  a `<user_id>/` subdirectory per participating user (raw provider response,
+  canonical menu, LLM request/response, per-attempt LLM trail including
+  rejected attempts, and that user's own `metadata.json` with LLM
+  diagnostics and the failed step). When batch mode is used, the raw
+  OpenRouter batch response (every row's output) is also saved once per run
+  as `<run_id>/batch_result.json` rather than logged. Cleanup is
+  retention-based (`retention_days`) and keeps the most recent `max_runs`
+  run directories.
 - Structured JSON logging to stdout.
 
 ## Project structure
