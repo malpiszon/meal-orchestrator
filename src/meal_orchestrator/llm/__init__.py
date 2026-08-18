@@ -11,8 +11,22 @@ from meal_orchestrator.llm.openrouter import (
     OpenRouterResponseError,
     StructuredOutputError,
 )
+from meal_orchestrator.llm.openrouter_batch import (
+    PENDING_STATUSES,
+    BatchRequestRow,
+    BatchRowError,
+    BatchStatus,
+    batch_status,
+    get_batch,
+    parse_batch_results,
+    submit_batch,
+)
 
 __all__ = [
+    "PENDING_STATUSES",
+    "BatchRequestRow",
+    "BatchRowError",
+    "BatchStatus",
     "EmptyLlmResponseError",
     "IncompleteAssessmentError",
     "LlmFailureDetails",
@@ -22,4 +36,8 @@ __all__ = [
     "StructuredOutputError",
     "UnsupportedModelError",
     "assert_structured_output_supported",
+    "batch_status",
+    "get_batch",
+    "parse_batch_results",
+    "submit_batch",
 ]

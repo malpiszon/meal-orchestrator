@@ -12,6 +12,8 @@ from meal_orchestrator.domain import CanonicalMenu, LlmRequest, LlmResult
 
 logger = logging.getLogger(__name__)
 
+_BATCH_RESULTS_DIR_NAME = "batches"
+
 
 class RunArtifacts:
     """No-op artifact writer — used when artifacts are disabled."""
@@ -104,6 +106,19 @@ class ArtifactStore:
     def for_run(self, run_id: str, user_id: str) -> RunArtifacts:
         if not self._config:
             return RunArtifacts()
+        if user_id == _BATCH_RESULTS_DIR_NAME:
+            # user_id is an unvalidated free-form string (config/loader.py), and it
+            # becomes a directory name here — a user literally configured with this
+            # id would otherwise collide with the reserved batch-results directory
+            # and silently escape cleanup()'s per-user retention.
+            logger.warning(
+                "artifact store: user id %r collides with the reserved %r directory "
+                "used for batch results — artifacts disabled for this user",
+                user_id,
+                _BATCH_RESULTS_DIR_NAME,
+                extra={"run_id": run_id, "user_id": user_id, "step": "artifacts"},
+            )
+            return RunArtifacts()
         run_dir = self._config.path / user_id / run_id
         try:
             return _FilesystemRunArtifacts(run_dir)
@@ -117,6 +132,41 @@ class ArtifactStore:
             )
             return RunArtifacts()
 
+    def save_batch_result(self, run_id: str, data: dict[str, Any]) -> bool:
+        """Persist the raw OpenRouter batch response (status, request_counts,
+        aggregate usage/cost, per-row results) once per run — this is the
+        only place that data is durably captured; logging it would mean
+        dumping an arbitrarily large payload (every row's full LLM output)
+        to stdout on every run.
+
+        Returns whether the save actually succeeded, so a caller about to
+        tell an operator "see the saved artifact for detail" doesn't say so
+        when there's nothing there to see.
+
+        Time-based retention only (via `cleanup()`, `retention_days`) — no
+        `max_runs_per_user`-style count, since these are one file per run,
+        not per-user; there's no natural per-user count to bound.
+        """
+        if not self._config:
+            return False
+        path = self._config.path / _BATCH_RESULTS_DIR_NAME / f"{run_id}.json"
+        try:
+            _write_json(path, data)
+            return True
+        except Exception:
+            # Broad on purpose, matching _FilesystemRunArtifacts._write_safe: a
+            # write can fail for reasons beyond OSError (e.g. an LLM-generated
+            # string with a lone surrogate codepoint failing UTF-8 encoding),
+            # and an artifact write failing must never crash the batch delivery
+            # it's incidental to.
+            logger.warning(
+                "artifact store: failed to save batch result %s",
+                path,
+                exc_info=True,
+                extra={"run_id": run_id, "step": "artifacts"},
+            )
+            return False
+
     def cleanup(self) -> None:
         if not self._config:
             return
@@ -125,9 +175,10 @@ class ArtifactStore:
             return
         cutoff = datetime.now(UTC) - timedelta(days=self._config.retention_days)
         for user_dir in base.iterdir():
-            if not user_dir.is_dir():
+            if not user_dir.is_dir() or user_dir.name == _BATCH_RESULTS_DIR_NAME:
                 continue
             _cleanup_user_dir(user_dir, cutoff, self._config.max_runs_per_user)
+        _cleanup_batch_results(base / _BATCH_RESULTS_DIR_NAME, cutoff)
 
 
 def _cleanup_user_dir(user_dir: Path, cutoff: datetime, max_runs: int) -> None:
@@ -144,6 +195,21 @@ def _cleanup_user_dir(user_dir: Path, cutoff: datetime, max_runs: int) -> None:
         if mtime < cutoff:
             logger.debug("artifact cleanup: removing expired run %s", run_dir)
             shutil.rmtree(run_dir, ignore_errors=True)
+
+
+def _cleanup_batch_results(batches_dir: Path, cutoff: datetime) -> None:
+    """Time-based only — these are one flat file per run, not per-user run
+    directories, so `max_runs_per_user`'s per-user count doesn't apply here.
+    """
+    if not batches_dir.exists():
+        return
+    for batch_file in batches_dir.iterdir():
+        if not batch_file.is_file():
+            continue
+        mtime = datetime.fromtimestamp(batch_file.stat().st_mtime, tz=UTC)
+        if mtime < cutoff:
+            logger.debug("artifact cleanup: removing expired batch result %s", batch_file)
+            batch_file.unlink(missing_ok=True)
 
 
 def _write_json(path: Path, data: Any) -> None:

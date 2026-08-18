@@ -707,6 +707,71 @@ def test_execute_split_into_two_calls_matches_execute_in_one_call(tmp_path) -> N
     assert split.model == combined.model
 
 
+def test_execute_from_llm_result_runs_llm_and_delivers(tmp_path) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    user = user_config(PathLikePrompt(prompt_file, tmp_path))
+    run_context = _context(dry_run=False)
+    executor = _executor(
+        tmp_path, FakeProvider(), FakeLlmClient(), FakeEmailClient(), FakeDiscordClient()
+    )
+    outcome = executor.fetch_menu(user, run_context)
+    llm_result = LlmResult(
+        structured=week_assessment(outcome.menu), model="fallback-model", attempt=1
+    )
+
+    result = executor.execute_from_llm_result(
+        user,
+        run_context,
+        outcome.menu,
+        llm_result,
+        outcome.artifacts,
+        outcome.state,
+        outcome.log_context,
+    )
+
+    assert result.status == WorkflowStatus.COMPLETED
+    assert result.model == "fallback-model"
+    assert result.retry_count == 0
+
+
+def test_execute_from_llm_result_reports_correct_failed_step_on_save_error(tmp_path) -> None:
+    """A failure saving the (already-generated) LLM response must be reported
+    against a step name specific to this method, not the stale default
+    inherited from the earlier menu-fetch phase's _WorkflowState.
+    """
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    user = user_config(PathLikePrompt(prompt_file, tmp_path))
+    run_context = _context(dry_run=False)
+    executor = _executor(
+        tmp_path, FakeProvider(), FakeLlmClient(), FakeEmailClient(), FakeDiscordClient()
+    )
+    outcome = executor.fetch_menu(user, run_context)
+    assert outcome.state.failed_step == "provider"  # the stale default this bug used to leak
+    llm_result = LlmResult(structured=week_assessment(outcome.menu), model="test-model", attempt=1)
+
+    class BrokenArtifacts:
+        def save_llm_response(self, result) -> None:
+            raise RuntimeError("disk full")
+
+        def save_metadata(self, metadata) -> None:
+            pass
+
+    result = executor.execute_from_llm_result(
+        user,
+        run_context,
+        outcome.menu,
+        llm_result,
+        BrokenArtifacts(),
+        outcome.state,
+        outcome.log_context,
+    )
+
+    assert result.status == WorkflowStatus.FAILED
+    assert result.failed_step == "save_llm_response"
+
+
 def _executor(
     tmp_path, provider, llm, email, discord, artifact_store=None, config=None
 ) -> UserWorkflowExecutor:

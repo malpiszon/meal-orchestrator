@@ -145,3 +145,74 @@ def test_cleanup_respects_max_runs_per_user(tmp_path: Path) -> None:
 def test_cleanup_noop_when_path_missing(tmp_path: Path) -> None:
     store = ArtifactStore(_config(tmp_path))
     store.cleanup()
+
+
+def test_save_batch_result_writes_one_file_per_run(tmp_path: Path) -> None:
+    store = ArtifactStore(_config(tmp_path))
+
+    store.save_batch_result("run-1", {"id": "batch-1", "status": "completed"})
+
+    path = tmp_path / "artifacts" / "batches" / "run-1.json"
+    assert json.loads(path.read_text()) == {"id": "batch-1", "status": "completed"}
+
+
+def test_save_batch_result_noop_when_no_config(tmp_path: Path) -> None:
+    store = ArtifactStore(None)
+    store.save_batch_result("run-1", {"id": "batch-1", "status": "completed"})
+    assert not (tmp_path / "artifacts").exists()
+
+
+def test_save_batch_result_returns_true_on_success(tmp_path: Path) -> None:
+    store = ArtifactStore(_config(tmp_path))
+    assert store.save_batch_result("run-1", {"id": "batch-1"}) is True
+
+
+def test_save_batch_result_returns_false_and_does_not_raise_on_unserializable_data(
+    tmp_path: Path,
+) -> None:
+    """The write must degrade gracefully (like every other artifact writer)
+    for any write failure, not just OSError — e.g. a value json.dumps can't
+    serialize at all (a real-world case: a lone/unpaired surrogate codepoint
+    in LLM-generated text raises UnicodeEncodeError, not OSError).
+    """
+    store = ArtifactStore(_config(tmp_path))
+
+    result = store.save_batch_result("run-1", {"bad": object()})  # not JSON-serializable
+
+    assert result is False
+    assert not (tmp_path / "artifacts" / "batches" / "run-1.json").exists()
+
+
+def test_for_run_disabled_when_user_id_collides_with_reserved_batches_name(
+    tmp_path: Path,
+) -> None:
+    """A user configured with id "batches" would otherwise collide with the
+    reserved directory batch results live in and silently escape per-user
+    retention — artifacts must be disabled for that user instead.
+    """
+    store = ArtifactStore(_config(tmp_path))
+
+    run = store.for_run("run-1", "batches")
+    run.save_metadata({"status": "completed"})
+
+    assert not (tmp_path / "artifacts" / "batches" / "run-1").exists()
+
+
+def test_cleanup_removes_expired_batch_results(tmp_path: Path) -> None:
+    """batches/ holds one flat file per run, not per-user run directories, so
+    it gets its own time-based cleanup here rather than being walked by
+    `_cleanup_user_dir`'s per-user (`max_runs_per_user`) logic.
+    """
+    store = ArtifactStore(_config(tmp_path, retention_days=7))
+    store.save_batch_result("old-run", {"id": "batch-1", "status": "completed"})
+    store.save_batch_result("new-run", {"id": "batch-2", "status": "completed"})
+
+    old_file = tmp_path / "artifacts" / "batches" / "old-run.json"
+    new_file = tmp_path / "artifacts" / "batches" / "new-run.json"
+    old_time = (datetime.now(UTC) - timedelta(days=8)).timestamp()
+    os.utime(old_file, (old_time, old_time))
+
+    store.cleanup()
+
+    assert not old_file.exists()
+    assert new_file.exists()

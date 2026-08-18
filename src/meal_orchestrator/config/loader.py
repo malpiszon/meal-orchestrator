@@ -8,6 +8,7 @@ import yaml
 from meal_orchestrator.config.models import (
     AppConfig,
     ArtifactConfig,
+    BatchConfig,
     DeliveryConfig,
     LlmConfig,
     RuntimeConfig,
@@ -39,6 +40,7 @@ def load_app_config(path: Path) -> AppConfig:
             fallback_models=_parse_fallback_models(
                 _optional(data, "llm", "fallback_models"), llm_model
             ),
+            batch=_parse_batch(data),
         ),
         default_provider=_required(data, "providers", "default"),
         delivery=DeliveryConfig(
@@ -67,6 +69,64 @@ def _parse_max_concurrent_users(raw: Any) -> int:
     if isinstance(raw, bool) or not isinstance(raw, int) or raw < 1:
         raise ConfigError("runtime.max_concurrent_users must be a positive integer")
     return raw
+
+
+def _parse_batch(data: dict[str, Any]) -> BatchConfig:
+    raw = data.get("llm", {}).get("batch") if isinstance(data.get("llm"), dict) else None
+    if raw is None:
+        return BatchConfig()
+    if not isinstance(raw, dict):
+        raise ConfigError("llm.batch must be a mapping")
+    defaults = BatchConfig()
+    enabled = raw.get("enabled", defaults.enabled)
+    if not isinstance(enabled, bool):
+        raise ConfigError("llm.batch.enabled must be a boolean")
+    state_dir_raw = raw.get("state_dir")
+    if enabled and state_dir_raw is None:
+        raise ConfigError("llm.batch.state_dir is required when llm.batch.enabled is true")
+    state_dir = Path(str(state_dir_raw)) if state_dir_raw is not None else None
+    initial_check_delay_seconds = _non_negative_int(
+        raw.get("initial_check_delay_seconds", defaults.initial_check_delay_seconds),
+        "llm.batch.initial_check_delay_seconds",
+    )
+    initial_poll_interval_seconds = _positive_int(
+        raw.get("initial_poll_interval_seconds", defaults.initial_poll_interval_seconds),
+        "llm.batch.initial_poll_interval_seconds",
+    )
+    max_poll_interval_seconds = _positive_int(
+        raw.get("max_poll_interval_seconds", defaults.max_poll_interval_seconds),
+        "llm.batch.max_poll_interval_seconds",
+    )
+    if initial_poll_interval_seconds > max_poll_interval_seconds:
+        raise ConfigError(
+            "llm.batch.initial_poll_interval_seconds must not exceed "
+            "llm.batch.max_poll_interval_seconds"
+        )
+    return BatchConfig(
+        enabled=enabled,
+        state_dir=state_dir,
+        initial_check_delay_seconds=initial_check_delay_seconds,
+        initial_poll_interval_seconds=initial_poll_interval_seconds,
+        max_poll_interval_seconds=max_poll_interval_seconds,
+        max_wait_hours=_positive_int(
+            raw.get("max_wait_hours", defaults.max_wait_hours), "llm.batch.max_wait_hours"
+        ),
+    )
+
+
+def _positive_int(value: Any, field_name: str) -> int:
+    return _int_at_least(value, field_name, minimum=1)
+
+
+def _non_negative_int(value: Any, field_name: str) -> int:
+    return _int_at_least(value, field_name, minimum=0)
+
+
+def _int_at_least(value: Any, field_name: str, *, minimum: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        kind = "positive" if minimum == 1 else "non-negative"
+        raise ConfigError(f"{field_name} must be a {kind} integer")
+    return value
 
 
 def _parse_artifacts(data: dict[str, Any]) -> ArtifactConfig | None:

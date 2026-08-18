@@ -13,6 +13,17 @@ llm:
   max_retries: 3
   fallback_models:
     - "google/gemini-3.1-flash-lite"
+  # OpenRouter batch mode (beta, ~50% cheaper, blocks a run for up to
+  # max_wait_hours). Disabled by default — see README's Known limitations.
+  batch:
+    enabled: false
+    # Durable resume state + run lock; required when enabled. Needs a
+    # persistent mount, same as artifacts.path below, to survive restarts.
+    state_dir: "/data/batch_state"
+    initial_check_delay_seconds: 15
+    initial_poll_interval_seconds: 120
+    max_poll_interval_seconds: 3600
+    max_wait_hours: 26
 
 providers:
   default: "example_provider"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import os
@@ -7,6 +8,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import NamedTuple
 
 from meal_orchestrator import __version__
 from meal_orchestrator.artifacts import ArtifactStore, RunArtifacts
@@ -39,6 +41,7 @@ from meal_orchestrator.providers import (
 from meal_orchestrator.rendering.html import render_html
 from meal_orchestrator.rendering.labels import SUBJECT_EMOJI
 from meal_orchestrator.rendering.plain_text import render_plain_text
+from meal_orchestrator.worker_pool import NotifyOps, run_pool
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +112,17 @@ class _MenuFetchOutcome:
     artifacts: RunArtifacts | None = None
     state: _WorkflowState | None = None
     log_context: dict | None = None
+
+
+class PendingUser(NamedTuple):
+    """A user whose menu was fetched successfully and is awaiting the second
+    (LLM/email/Discord) phase of the pipeline — synchronous or via batch.
+    """
+
+    executor: UserWorkflowExecutor
+    user: UserConfig
+    run_context: RunContext
+    outcome: _MenuFetchOutcome
 
 
 class UserWorkflowExecutor:
@@ -220,7 +234,7 @@ class UserWorkflowExecutor:
         log_context = {**log_context, "worker": threading.current_thread().name}
         try:
             state.failed_step = "prompt"
-            llm_request = self._build_llm_request(user, run_context, menu, log_context)
+            llm_request = self.build_llm_request(user, run_context, menu, log_context)
             artifacts.save_llm_request(llm_request)
 
             state.failed_step = "llm"
@@ -241,6 +255,57 @@ class UserWorkflowExecutor:
                 user_id=user.id,
                 status=WorkflowStatus.COMPLETED,
                 retry_count=retry_count,
+                model=llm_result.model,
+            )
+        except Exception as exc:
+            return self._generic_failure_result(user, state, log_context, exc)
+        finally:
+            self._save_metadata(artifacts, user, run_context, state)
+
+    def execute_from_llm_result(
+        self,
+        user: UserConfig,
+        run_context: RunContext,
+        menu: CanonicalMenu,
+        llm_result: LlmResult,
+        artifacts: RunArtifacts,
+        state: _WorkflowState,
+        log_context: dict,
+    ) -> WorkflowResult:
+        """Deliver an already-generated LLM result via email + Discord.
+
+        Mirrors the tail of `execute_from_menu` after the LLM call — for use
+        when the LLM step already happened out-of-process (an OpenRouter batch
+        result), so there's nothing left to build/call, only to deliver.
+
+        Unlike `execute_from_menu`, this never populates `state.llm_attempts_summary`
+        (that only exists inside `_generate_plan`'s retry loop, which a batch
+        delivery skips entirely) — so a batch-delivered row's metadata.json has
+        no `total_cost`, and `token_usage` here never carries a `cost` key either.
+        That's not an oversight: OpenRouter only reports cost once per batch,
+        aggregated across every row (see ArtifactStore.save_batch_result /
+        artifacts/batches/<run_id>.json), not per row, so there's no real
+        per-row figure to attribute here.
+        """
+        log_context = {**log_context, "worker": threading.current_thread().name}
+        try:
+            state.failed_step = "save_llm_response"
+            artifacts.save_llm_response(llm_result)
+            state.model = llm_result.model
+            state.token_usage = llm_result.token_usage
+
+            state.failed_step = "email"
+            self._deliver_email(user, run_context, menu, llm_result, log_context)
+
+            state.failed_step = "discord"
+            self._notify_plan_ready(user, run_context, log_context)
+
+            logger.info("user workflow completed", extra={**log_context, "step": "complete"})
+            state.status = WorkflowStatus.COMPLETED
+            return WorkflowResult(
+                user_id=user.id,
+                status=WorkflowStatus.COMPLETED,
+                retry_count=0,
                 model=llm_result.model,
             )
         except Exception as exc:
@@ -300,7 +365,7 @@ class UserWorkflowExecutor:
         )
         return menu
 
-    def _build_llm_request(
+    def build_llm_request(
         self,
         user: UserConfig,
         run_context: RunContext,
@@ -469,6 +534,40 @@ class UserWorkflowExecutor:
         if state.llm_failure is not None:
             metadata["llm_failure"] = state.llm_failure.to_metadata()
         artifacts.save_metadata(metadata)
+
+
+def process_pending_synchronously(
+    pending: dict[str, PendingUser],
+    max_concurrent_users: int,
+    run_id: str,
+    notify_ops: NotifyOps,
+) -> dict[str, WorkflowResult]:
+    """Run prompt -> LLM -> email -> Discord for every user whose menu was
+    fetched successfully, bounded by max_concurrent_users.
+
+    This is the "normal" (non-batch) remainder-of-pipeline path, and also
+    what batch processing falls back to for a whole run (batch unavailable/
+    timed out) or an individual row (batch row failed/missing).
+    """
+    work_items = {
+        user_id: functools.partial(
+            pending_user.executor.execute_from_menu,
+            pending_user.user,
+            pending_user.run_context,
+            pending_user.outcome.menu,
+            pending_user.outcome.artifacts,
+            pending_user.outcome.state,
+            pending_user.outcome.log_context,
+        )
+        for user_id, pending_user in pending.items()
+    }
+    return run_pool(
+        work_items,
+        max_concurrent_users,
+        run_id=run_id,
+        notify_ops=notify_ops,
+        worker_label="user workflow worker",
+    )
 
 
 def _discord_enabled(run_context: RunContext, user: UserConfig) -> bool:

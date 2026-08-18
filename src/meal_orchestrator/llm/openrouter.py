@@ -135,10 +135,52 @@ _RESPONSE_FORMAT: dict[str, Any] = {
 }
 
 
+def build_request_body(
+    model: str, payload: PromptPayload, feedback: str | None = None
+) -> dict[str, Any]:
+    """Build the chat-completion request body for one model call.
+
+    Shared by the synchronous client and the batch client (`openrouter_batch.py`)
+    so both send an identical request shape.
+    """
+    return {
+        "model": model,
+        "messages": [{"role": "user", "content": _build_message_content(payload, feedback)}],
+        "response_format": _RESPONSE_FORMAT,
+        # Skip any endpoint that would silently ignore response_format rather
+        # than risk a non-schema-conforming completion from it.
+        "provider": {"require_parameters": True},
+    }
+
+
+def parse_batch_completion(
+    response: dict[str, Any], menu: CanonicalMenu, requested_model: str
+) -> LlmResult:
+    """Parse a single completed batch row's response body into an LlmResult.
+
+    Reuses the same schema validation/completeness checks as the synchronous
+    client, but performs no retries — a batch row that fails validation raises
+    directly (OpenRouterResponseError) for the caller to handle as a per-row
+    failure, since the batch has already run and there's nothing left to retry.
+    """
+    assessment = _response_structured(response, menu, attempt=1)
+    return _build_result(response, assessment, attempt=1, requested_model=requested_model)
+
+
 class OpenRouterClient:
     def __init__(self, *, api_key: str | None = None, max_retries: int = 3) -> None:
         self._api_key = api_key if api_key is not None else os.environ["OPENROUTER_API_KEY"]
         self._max_retries = max_retries
+
+    @property
+    def api_key(self) -> str:
+        """The key this client sends requests with.
+
+        Exposed so callers that talk to other OpenRouter endpoints outside
+        this class (e.g. the batch client) can reuse the same configured
+        credential instead of independently re-reading OPENROUTER_API_KEY.
+        """
+        return self._api_key
 
     def generate(
         self,
@@ -159,21 +201,9 @@ class OpenRouterClient:
         def _call(model: str) -> tuple[dict[str, Any], WeekAssessment]:
             nonlocal attempt
             attempt += 1
-            body = json.dumps(
-                {
-                    "model": model,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": _build_message_content(request.payload, feedback),
-                        }
-                    ],
-                    "response_format": _RESPONSE_FORMAT,
-                    # Skip any endpoint that would silently ignore response_format
-                    # rather than risk a non-schema-conforming completion from it.
-                    "provider": {"require_parameters": True},
-                }
-            ).encode("utf-8")
+            body = json.dumps(build_request_body(model, request.payload, feedback)).encode(
+                "utf-8"
+            )
             try:
                 raw = post_json(
                     _API_URL, headers=headers, body=body, timeout_seconds=request.timeout_seconds

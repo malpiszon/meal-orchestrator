@@ -66,7 +66,11 @@ notification is sent instead of treating it as an error.
 - Per-run debug artifacts (raw provider response, canonical menu, LLM
   request/response, per-attempt LLM trail including rejected attempts, run
   metadata including LLM diagnostics and the failed step) with
-  retention-based cleanup.
+  retention-based cleanup. When batch mode is used, the raw OpenRouter batch
+  response (aggregate cost/usage, every row's output) is saved once per run
+  under `artifacts/batches/` rather than logged, pruned by `retention_days`
+  like everything else but with no `max_runs_per_user`-style count (these
+  are one file per run, not per-user).
 - Structured JSON logging to stdout.
 
 ## Project structure
@@ -76,10 +80,14 @@ src/meal_orchestrator/
   cli.py            entrypoint: argument parsing, env var checks
   orchestrator.py    run-level orchestration: user selection, target week, sequential menu fetch then bounded-parallel remainder, operational notifications
   workflow.py         per-user workflow: fetch -> normalize -> prompt -> LLM -> email -> Discord
+  batch_coordinator.py OpenRouter batch subsystem: submit/resume, run lock, poll-with-timeout-fallback, per-row delivery
+  batch_runner.py       batch subsystem mechanism: durable pending-batch state, cross-process lock file, generic poll loop
+  worker_pool.py       generic bounded thread pool shared by the plain and batch delivery paths
+  ops_notifications.py formats and sends the per-user and capability-check-failure operational Discord notifications
   config/              YAML loading and config dataclasses
   domain/              shared dataclasses (canonical menu, requests/results, workflow status)
   providers/           provider adapters, one package per provider
-  llm/                 OpenRouter client, model capability check
+  llm/                 OpenRouter client, model capability check, OpenRouter batch API client (openrouter_batch.py)
   rendering/           renders a structured LLM assessment to plain text
   delivery/            Resend email client, Discord webhook client
   observability/       structured logging setup
@@ -227,6 +235,16 @@ auto-generated notes.
   workflow calls `OpenRouterClient` directly. OpenRouter already abstracts
   over multiple model providers, so the extra layer isn't worth it until
   batch/async execution is needed.
+- **Batch mechanism vs. policy, split across three files.** `batch_runner.py`
+  holds only durable-state I/O, cross-process locking, and a generic
+  poll-until-terminal loop — no OpenRouter or orchestration knowledge.
+  `batch_coordinator.py`'s `BatchCoordinator` owns the actual batch policy
+  (submit-or-resume, timeout fallback, per-row delivery/retry) and is a
+  collaborator `RunOrchestrator` delegates to once menus are fetched, the
+  same way it already delegates per-user work to `UserWorkflowExecutor`.
+  `worker_pool.py`'s `run_pool` is the bounded-thread-pool driver shared by
+  the plain and batch delivery paths, since both need identical "one result
+  per user, a worker exception becomes a FAILED result" semantics.
 - **Menu unavailability is an expected outcome, not an error.** It short-
   circuits a user's workflow (skip LLM/email, send a status notification)
   rather than failing the run.
@@ -244,10 +262,22 @@ auto-generated notes.
 ## Known limitations
 
 - No web UI or database; everything is driven by CLI + YAML config.
-- Only one LLM request per user per run (no batching). If a future change
-  moves to a batch-submit LLM API with long (up to 24h) wait times, the
-  `max_concurrent_users` sizing philosophy would need revisiting — today it
-  bounds concurrent HTTP round-trips, not concurrent long-lived waits.
+- Optional OpenRouter batch mode (`llm.batch.enabled`, beta on OpenRouter's
+  side, disabled by default, always bypassed for dry runs) submits every
+  user's LLM request as one batch for a ~50% token-price discount. A run
+  blocks internally (backoff-polling) for up to `llm.batch.max_wait_hours`
+  instead of returning within minutes, so the scheduler/container running it
+  must allow that long an execution. On timeout or failure it falls back to
+  synchronous per-user calls (with an ops Discord alert); a batch row that
+  individually fails or is missing gets that same synchronous retry +
+  fallback_models resilience, with one aggregate alert if any row needed it.
+  `llm.batch.state_dir` (required when enabled) holds the durable resume
+  state and cross-process lock — point it at a persistent mount, the same
+  one `artifacts.path` uses, not the container's ephemeral working
+  directory, or a crash loses the ability to resume. OpenRouter has no
+  cancel-batch endpoint, so an abandoned batch keeps billing after a timeout
+  fallback — keep `max_wait_hours` comfortably above typical turnaround to
+  make that rare.
 - If any purchased meal is missing for any day in the target week, that
   user's entire run is treated as menu-unavailable — there's no
   partial-week handling.
