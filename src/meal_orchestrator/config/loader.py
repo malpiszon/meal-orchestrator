@@ -115,14 +115,17 @@ def _parse_batch(data: dict[str, Any]) -> BatchConfig:
 
 
 def _positive_int(value: Any, field_name: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-        raise ConfigError(f"{field_name} must be a positive integer")
-    return value
+    return _int_at_least(value, field_name, minimum=1)
 
 
 def _non_negative_int(value: Any, field_name: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise ConfigError(f"{field_name} must be a non-negative integer")
+    return _int_at_least(value, field_name, minimum=0)
+
+
+def _int_at_least(value: Any, field_name: str, *, minimum: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        kind = "positive" if minimum == 1 else "non-negative"
+        raise ConfigError(f"{field_name} must be a {kind} integer")
     return value
 
 

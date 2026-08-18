@@ -251,8 +251,7 @@ class BatchCoordinator:
             started_at=started_at,
             initial_check_delay_seconds=initial_check_delay_seconds,
         )
-        if data is not None:
-            artifact_store.save_batch_result(run_id, data)
+        batch_result_saved = data is not None and artifact_store.save_batch_result(run_id, data)
 
         # State is kept alive through delivery (not cleared right after polling
         # ends) so a crash during delivery can still resume — get_batch is a
@@ -263,8 +262,10 @@ class BatchCoordinator:
             logger.warning(
                 "openrouter batch did not complete usably; falling back to synchronous "
                 "processing%s",
-                "" if data is None else " (see the saved batch artifact for full detail, "
-                "e.g. an error/reason field OpenRouter may have included)",
+                " (see the saved batch artifact for full detail, e.g. an error/reason "
+                "field OpenRouter may have included)"
+                if batch_result_saved
+                else "",
                 extra={
                     "run_id": run_id,
                     "batch_id": batch_id,
