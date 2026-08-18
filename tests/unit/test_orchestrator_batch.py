@@ -43,7 +43,7 @@ def _no_capability_check(model: str, **_kwargs) -> None:
 
 def _batch_app_config(tmp_path, **batch_kwargs) -> AppConfig:
     return app_config(
-        batch=BatchConfig(enabled=True, state_dir=tmp_path / ".batch_state", **batch_kwargs)
+        batch=BatchConfig(enabled=True, state_dir=tmp_path / "batch_state", **batch_kwargs)
     )
 
 
@@ -54,7 +54,7 @@ def test_batch_state_persists_through_delivery_not_cleared_before_it(tmp_path, m
     to resume, forcing a full duplicate (billable) batch resubmission.
     """
     users = [_user(tmp_path, "alan")]
-    state_path = tmp_path / ".batch_state" / "pending_batch.json"
+    state_path = tmp_path / "batch_state" / "pending_batch.json"
     captured_custom_ids: list[str] = []
 
     def capturing_submit_batch(rows, **_kwargs):
@@ -182,8 +182,8 @@ def test_batch_mode_submits_polls_and_delivers(tmp_path, monkeypatch) -> None:
 
     assert all(r.status == WorkflowStatus.COMPLETED for r in results)
     assert len(email_client.messages) == 2
-    assert not (tmp_path / ".batch_state" / "pending_batch.json").exists()
-    assert not (tmp_path / ".batch_state" / "run.lock").exists()
+    assert not (tmp_path / "batch_state" / "pending_batch.json").exists()
+    assert not (tmp_path / "batch_state" / "run.lock").exists()
 
 
 def test_batch_mode_retries_row_failures_synchronously_with_fallback_models(
@@ -225,7 +225,7 @@ def test_batch_mode_retries_row_failures_synchronously_with_fallback_models(
     orchestrator = RunOrchestrator(
         app_config=app_config(
             fallback_models=["fallback-model"],
-            batch=BatchConfig(enabled=True, state_dir=tmp_path / ".batch_state"),
+            batch=BatchConfig(enabled=True, state_dir=tmp_path / "batch_state"),
         ),
         users=users,
         project_root=tmp_path,
@@ -427,7 +427,7 @@ def test_batch_mode_falls_back_to_sync_when_batch_times_out(tmp_path, monkeypatc
     results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
 
     assert results[0].status == WorkflowStatus.COMPLETED
-    assert not (tmp_path / ".batch_state" / "pending_batch.json").exists()
+    assert not (tmp_path / "batch_state" / "pending_batch.json").exists()
     fallback_msg = next(
         m for m in discord.messages if "falling back to synchronous" in m.description
     )
@@ -446,7 +446,7 @@ def test_batch_resume_deadline_counts_from_original_submission_not_resume_time(
 
     long_expired_submission = (datetime.now(UTC) - timedelta(hours=5)).isoformat()
     save_state(
-        tmp_path / ".batch_state",
+        tmp_path / "batch_state",
         PendingBatchState(
             run_id="run-resume",
             batch_id="batch-existing",
@@ -495,7 +495,7 @@ def test_batch_resume_deadline_counts_from_original_submission_not_resume_time(
 def test_batch_mode_resumes_pending_state_instead_of_resubmitting(tmp_path, monkeypatch) -> None:
     users = [_user(tmp_path, "alan")]
     save_state(
-        tmp_path / ".batch_state",
+        tmp_path / "batch_state",
         PendingBatchState(
             run_id="run-resume",
             batch_id="batch-existing",
@@ -564,7 +564,7 @@ def test_batch_mode_resumes_pending_state_instead_of_resubmitting(tmp_path, monk
     assert submit_calls == []
     assert results[0].status == WorkflowStatus.COMPLETED
     assert len(email_client.messages) == 1
-    assert not (tmp_path / ".batch_state" / "pending_batch.json").exists()
+    assert not (tmp_path / "batch_state" / "pending_batch.json").exists()
 
 
 def test_batch_resume_warns_when_a_pending_user_was_removed_from_config(
@@ -578,7 +578,7 @@ def test_batch_resume_warns_when_a_pending_user_was_removed_from_config(
 
     users = [_user(tmp_path, "alan")]  # "bob" was removed from config
     save_state(
-        tmp_path / ".batch_state",
+        tmp_path / "batch_state",
         PendingBatchState(
             run_id="run-resume",
             batch_id="batch-existing",
@@ -686,7 +686,7 @@ def test_batch_submission_falls_back_to_sync_when_lock_already_held(tmp_path, mo
 
     monkeypatch.setenv("DISCORD_OPS_WEBHOOK_URL", "https://example.com/ops")
     users = [_user(tmp_path, "alan")]
-    assert acquire_lock(tmp_path / ".batch_state") is True  # simulate another invocation running
+    assert acquire_lock(tmp_path / "batch_state") is True  # simulate another invocation running
 
     class SyncLlmClient:
         def generate(self, request, **_kwargs):
@@ -726,7 +726,7 @@ def test_batch_resume_reports_failure_not_empty_success_when_lock_held(tmp_path)
     from meal_orchestrator.batch_runner import acquire_lock
 
     save_state(
-        tmp_path / ".batch_state",
+        tmp_path / "batch_state",
         PendingBatchState(
             run_id="run-locked",
             batch_id="batch-locked",
@@ -737,7 +737,7 @@ def test_batch_resume_reports_failure_not_empty_success_when_lock_held(tmp_path)
             users=[PendingBatchUser(user_id="alan", custom_id="run-locked:alan")],
         ),
     )
-    assert acquire_lock(tmp_path / ".batch_state") is True  # simulate another invocation running
+    assert acquire_lock(tmp_path / "batch_state") is True  # simulate another invocation running
 
     class UnusedLlmClient:
         def generate(self, request, **_kwargs):
@@ -769,7 +769,7 @@ def test_batch_submission_degrades_to_sync_when_state_dir_unwritable(tmp_path) -
     users = [_user(tmp_path, "alan")]
     # Create a plain file where the state directory would go, so mkdir(parents=True)
     # fails with OSError (FileExistsError) instead of succeeding.
-    (tmp_path / ".batch_state").write_text("not a directory", encoding="utf-8")
+    (tmp_path / "batch_state").write_text("not a directory", encoding="utf-8")
 
     class SyncLlmClient:
         def generate(self, request, **_kwargs):

@@ -496,7 +496,7 @@ def test_batch_config_loaded_when_present(tmp_path) -> None:
         _base_app_yaml(
             """  batch:
     enabled: true
-    state_dir: /data/.batch_state
+    state_dir: /data/batch_state
     initial_poll_interval_seconds: 60
     max_poll_interval_seconds: 1800
     max_wait_hours: 10
@@ -508,7 +508,7 @@ def test_batch_config_loaded_when_present(tmp_path) -> None:
     app = load_app_config(path)
 
     assert app.llm.batch.enabled is True
-    assert app.llm.batch.state_dir == Path("/data/.batch_state")
+    assert app.llm.batch.state_dir == Path("/data/batch_state")
     assert app.llm.batch.initial_poll_interval_seconds == 60
     assert app.llm.batch.max_poll_interval_seconds == 1800
     assert app.llm.batch.max_wait_hours == 10
@@ -535,7 +535,7 @@ def test_batch_config_rejects_non_positive_max_wait_hours(tmp_path) -> None:
         _base_app_yaml(
             """  batch:
     enabled: true
-    state_dir: /data/.batch_state
+    state_dir: /data/batch_state
     max_wait_hours: 0
 """
         ),
@@ -552,7 +552,7 @@ def test_batch_config_rejects_initial_poll_interval_above_max(tmp_path) -> None:
         _base_app_yaml(
             """  batch:
     enabled: true
-    state_dir: /data/.batch_state
+    state_dir: /data/batch_state
     initial_poll_interval_seconds: 7200
     max_poll_interval_seconds: 3600
 """
