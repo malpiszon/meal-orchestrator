@@ -13,12 +13,12 @@ from tests.unit.helpers import canonical_menu, week_assessment
 
 
 def _config(
-    tmp_path: Path, *, retention_days: int = 14, max_runs_per_user: int = 10
+    tmp_path: Path, *, retention_days: int = 14, max_runs: int = 10
 ) -> ArtifactConfig:
     return ArtifactConfig(
         path=tmp_path / "artifacts",
         retention_days=retention_days,
-        max_runs_per_user=max_runs_per_user,
+        max_runs=max_runs,
     )
 
 
@@ -46,7 +46,7 @@ def test_saves_all_artifacts(tmp_path: Path) -> None:
     run.save_llm_response(_llm_result())
     run.save_metadata({"run_id": "run-1", "status": "completed"})
 
-    run_dir = tmp_path / "artifacts" / "alan" / "run-1"
+    run_dir = tmp_path / "artifacts" / "run-1" / "alan"
     assert (run_dir / "provider_raw.json").exists()
     assert (run_dir / "canonical_menu.json").exists()
     assert (run_dir / "llm_request.json").exists()
@@ -59,17 +59,17 @@ def test_artifacts_content(tmp_path: Path) -> None:
     run = store.for_run("run-1", "alan")
 
     run.save_provider_raw({"key": "value"})
-    raw = json.loads((tmp_path / "artifacts" / "alan" / "run-1" / "provider_raw.json").read_text())
+    raw = json.loads((tmp_path / "artifacts" / "run-1" / "alan" / "provider_raw.json").read_text())
     assert raw == {"key": "value"}
 
     run.save_llm_response(_llm_result())
     response = json.loads(
-        (tmp_path / "artifacts" / "alan" / "run-1" / "llm_response.json").read_text()
+        (tmp_path / "artifacts" / "run-1" / "alan" / "llm_response.json").read_text()
     )
     assert response == week_assessment(canonical_menu()).model_dump(mode="json")
 
     run.save_llm_request(_llm_request())
-    req = json.loads((tmp_path / "artifacts" / "alan" / "run-1" / "llm_request.json").read_text())
+    req = json.loads((tmp_path / "artifacts" / "run-1" / "alan" / "llm_request.json").read_text())
     assert req["model"] == "test-model"
     assert req["app_prompt"] == "Score every variant."
     assert req["user_prompt"] == "Choose meals."
@@ -84,7 +84,7 @@ def test_skips_llm_response_artifact_when_structured_is_invalid(tmp_path: Path) 
         LlmResult(structured=None, model="test-model", attempt=1)  # type: ignore[arg-type]
     )
 
-    assert not (tmp_path / "artifacts" / "example" / "run-1" / "llm_response.json").exists()
+    assert not (tmp_path / "artifacts" / "run-1" / "example" / "llm_response.json").exists()
 
 
 def test_noop_when_no_config(tmp_path: Path) -> None:
@@ -99,11 +99,11 @@ def test_noop_when_mkdir_fails(tmp_path: Path) -> None:
     unwritable.mkdir()
     unwritable.chmod(0o555)
     try:
-        config = ArtifactConfig(path=unwritable, retention_days=14, max_runs_per_user=10)
+        config = ArtifactConfig(path=unwritable, retention_days=14, max_runs=10)
         store = ArtifactStore(config)
         run = store.for_run("run-1", "alan")
         run.save_metadata({"status": "completed"})
-        assert not (unwritable / "alan").exists()
+        assert not (unwritable / "run-1").exists()
     finally:
         unwritable.chmod(0o755)
 
@@ -112,33 +112,33 @@ def test_cleanup_removes_old_runs(tmp_path: Path) -> None:
     store = ArtifactStore(_config(tmp_path, retention_days=7))
     artifacts_dir = tmp_path / "artifacts"
 
-    old_dir = artifacts_dir / "alan" / "old-run"
-    new_dir = artifacts_dir / "alan" / "new-run"
+    old_dir = artifacts_dir / "old-run" / "alan"
+    new_dir = artifacts_dir / "new-run" / "alan"
     old_dir.mkdir(parents=True)
     new_dir.mkdir(parents=True)
 
     old_time = (datetime.now(UTC) - timedelta(days=8)).timestamp()
-    os.utime(old_dir, (old_time, old_time))
+    os.utime(artifacts_dir / "old-run", (old_time, old_time))
 
     store.cleanup()
 
-    assert not old_dir.exists()
-    assert new_dir.exists()
+    assert not (artifacts_dir / "old-run").exists()
+    assert (artifacts_dir / "new-run").exists()
 
 
-def test_cleanup_respects_max_runs_per_user(tmp_path: Path) -> None:
-    store = ArtifactStore(_config(tmp_path, max_runs_per_user=2))
+def test_cleanup_respects_max_runs(tmp_path: Path) -> None:
+    store = ArtifactStore(_config(tmp_path, max_runs=2))
     artifacts_dir = tmp_path / "artifacts"
 
     for i in range(4):
-        run_dir = artifacts_dir / "alan" / f"run-{i}"
+        run_dir = artifacts_dir / f"run-{i}"
         run_dir.mkdir(parents=True)
         t = time.time() - (4 - i)
         os.utime(run_dir, (t, t))
 
     store.cleanup()
 
-    remaining = sorted(d.name for d in (artifacts_dir / "alan").iterdir())
+    remaining = sorted(d.name for d in artifacts_dir.iterdir())
     assert remaining == ["run-2", "run-3"]
 
 
@@ -147,12 +147,27 @@ def test_cleanup_noop_when_path_missing(tmp_path: Path) -> None:
     store.cleanup()
 
 
+def test_save_run_metadata_writes_one_file_per_run(tmp_path: Path) -> None:
+    store = ArtifactStore(_config(tmp_path))
+
+    store.save_run_metadata("run-1", {"run_id": "run-1", "mode": "sync"})
+
+    path = tmp_path / "artifacts" / "run-1" / "metadata.json"
+    assert json.loads(path.read_text()) == {"run_id": "run-1", "mode": "sync"}
+
+
+def test_save_run_metadata_noop_when_no_config(tmp_path: Path) -> None:
+    store = ArtifactStore(None)
+    store.save_run_metadata("run-1", {"run_id": "run-1"})
+    assert not (tmp_path / "artifacts").exists()
+
+
 def test_save_batch_result_writes_one_file_per_run(tmp_path: Path) -> None:
     store = ArtifactStore(_config(tmp_path))
 
     store.save_batch_result("run-1", {"id": "batch-1", "status": "completed"})
 
-    path = tmp_path / "artifacts" / "batches" / "run-1.json"
+    path = tmp_path / "artifacts" / "run-1" / "batch_result.json"
     assert json.loads(path.read_text()) == {"id": "batch-1", "status": "completed"}
 
 
@@ -180,39 +195,36 @@ def test_save_batch_result_returns_false_and_does_not_raise_on_unserializable_da
     result = store.save_batch_result("run-1", {"bad": object()})  # not JSON-serializable
 
     assert result is False
-    assert not (tmp_path / "artifacts" / "batches" / "run-1.json").exists()
+    assert not (tmp_path / "artifacts" / "run-1" / "batch_result.json").exists()
 
 
-def test_for_run_disabled_when_user_id_collides_with_reserved_batches_name(
+def test_for_run_disabled_when_user_id_collides_with_reserved_run_filename(
     tmp_path: Path,
 ) -> None:
-    """A user configured with id "batches" would otherwise collide with the
-    reserved directory batch results live in and silently escape per-user
-    retention — artifacts must be disabled for that user instead.
+    """A user configured with id "metadata.json" would otherwise collide
+    with the run-level metadata.json written alongside per-user directories
+    — artifacts must be disabled for that user instead.
     """
     store = ArtifactStore(_config(tmp_path))
 
-    run = store.for_run("run-1", "batches")
+    run = store.for_run("run-1", "metadata.json")
     run.save_metadata({"status": "completed"})
 
-    assert not (tmp_path / "artifacts" / "batches" / "run-1").exists()
+    assert not (tmp_path / "artifacts" / "run-1" / "metadata.json").is_dir()
 
 
-def test_cleanup_removes_expired_batch_results(tmp_path: Path) -> None:
-    """batches/ holds one flat file per run, not per-user run directories, so
-    it gets its own time-based cleanup here rather than being walked by
-    `_cleanup_user_dir`'s per-user (`max_runs_per_user`) logic.
-    """
+def test_cleanup_removes_run_with_batch_result_and_metadata(tmp_path: Path) -> None:
     store = ArtifactStore(_config(tmp_path, retention_days=7))
     store.save_batch_result("old-run", {"id": "batch-1", "status": "completed"})
+    store.save_run_metadata("old-run", {"run_id": "old-run"})
     store.save_batch_result("new-run", {"id": "batch-2", "status": "completed"})
+    store.save_run_metadata("new-run", {"run_id": "new-run"})
 
-    old_file = tmp_path / "artifacts" / "batches" / "old-run.json"
-    new_file = tmp_path / "artifacts" / "batches" / "new-run.json"
+    artifacts_dir = tmp_path / "artifacts"
     old_time = (datetime.now(UTC) - timedelta(days=8)).timestamp()
-    os.utime(old_file, (old_time, old_time))
+    os.utime(artifacts_dir / "old-run", (old_time, old_time))
 
     store.cleanup()
 
-    assert not old_file.exists()
-    assert new_file.exists()
+    assert not (artifacts_dir / "old-run").exists()
+    assert (artifacts_dir / "new-run" / "batch_result.json").exists()

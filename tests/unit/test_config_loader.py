@@ -15,7 +15,7 @@ def test_load_example_config_files() -> None:
     assert app.llm.dry_run_model == "google/gemini-2.5-flash-lite"
     assert app.artifacts is not None
     assert app.artifacts.retention_days == 14
-    assert app.artifacts.max_runs_per_user == 10
+    assert app.artifacts.max_runs == 10
     assert users[0].id == "example"
     assert users[0].purchased_meals[0].type == "breakfast"
 
@@ -309,7 +309,7 @@ delivery:
 artifacts:
   enabled: true
   retention_days: 14
-  max_runs_per_user: 10
+  max_runs: 10
 """,
         encoding="utf-8",
     )
@@ -337,7 +337,7 @@ artifacts:
   enabled: true
   path: /data/artifacts
   retention_days: 0
-  max_runs_per_user: 10
+  max_runs: 10
 """,
         encoding="utf-8",
     )

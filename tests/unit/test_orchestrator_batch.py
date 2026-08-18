@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime
 
 from meal_orchestrator.batch_coordinator import BatchCoordinator
 from meal_orchestrator.batch_runner import PendingBatchState, PendingBatchUser, save_state
@@ -254,7 +254,7 @@ def test_batch_mode_saves_raw_batch_result_as_artifact_not_just_a_log_line(
                 initial_poll_interval_seconds=0,
             ),
             artifacts=ArtifactConfig(
-                path=tmp_path / "artifacts", retention_days=14, max_runs_per_user=10
+                path=tmp_path / "artifacts", retention_days=14, max_runs=10
             ),
         ),
         users=users,
@@ -269,11 +269,17 @@ def test_batch_mode_saves_raw_batch_result_as_artifact_not_just_a_log_line(
     results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
 
     assert results[0].status == WorkflowStatus.COMPLETED
-    batch_files = list((tmp_path / "artifacts" / "batches").iterdir())
-    assert len(batch_files) == 1  # one file per run
-    saved = json.loads(batch_files[0].read_text())
+    run_dirs = [
+        d for d in (tmp_path / "artifacts").iterdir() if d.is_dir()
+    ]
+    assert len(run_dirs) == 1  # one directory per run
+    saved = json.loads((run_dirs[0] / "batch_result.json").read_text())
     assert saved["usage"]["cost"] == 0.001234
     assert saved["results"][0]["custom_id"].endswith(":alan")
+
+    run_metadata = json.loads((run_dirs[0] / "metadata.json").read_text())
+    assert run_metadata["mode"] == "batch"
+    assert run_metadata["aggregate_usage"]["cost"] == 0.001234
 
 
 def test_batch_mode_status_check_log_is_small_not_the_full_response(
@@ -795,7 +801,7 @@ def test_batch_resume_saves_raw_batch_result_as_artifact(tmp_path, monkeypatch) 
         app_config=app_config(
             batch=BatchConfig(enabled=True, state_dir=tmp_path / "batch_state"),
             artifacts=ArtifactConfig(
-                path=tmp_path / "artifacts", retention_days=14, max_runs_per_user=10
+                path=tmp_path / "artifacts", retention_days=14, max_runs=10
             ),
         ),
         users=users,
@@ -810,8 +816,14 @@ def test_batch_resume_saves_raw_batch_result_as_artifact(tmp_path, monkeypatch) 
     results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
 
     assert results[0].status == WorkflowStatus.COMPLETED
-    saved = json.loads((tmp_path / "artifacts" / "batches" / "run-resume.json").read_text())
+    saved = json.loads(
+        (tmp_path / "artifacts" / "run-resume" / "batch_result.json").read_text()
+    )
     assert saved["usage"]["cost"] == 0.000567
+    run_metadata = json.loads(
+        (tmp_path / "artifacts" / "run-resume" / "metadata.json").read_text()
+    )
+    assert run_metadata["aggregate_usage"]["cost"] == 0.000567
 
 
 def test_batch_resume_warns_when_a_pending_user_was_removed_from_config(
@@ -963,6 +975,96 @@ def test_batch_submission_falls_back_to_sync_when_lock_already_held(tmp_path, mo
         m for m in discord.messages if "falling back to synchronous" in m.description
     )
     assert "run lock already held" in fallback_msg.description
+
+
+def test_batch_submission_lock_busy_fallback_records_true_started_at(tmp_path) -> None:
+    """The lock-busy fallback's run metadata must record when synchronous
+    processing actually started, not the moment it finished — otherwise
+    metadata.json shows a near-zero duration instead of the real one.
+    """
+    import time
+
+    from meal_orchestrator.batch_runner import acquire_lock
+    from meal_orchestrator.config.models import ArtifactConfig
+
+    users = [_user(tmp_path, "alan")]
+    assert acquire_lock(tmp_path / "batch_state") is True  # simulate another invocation running
+
+    class SlowSyncLlmClient:
+        def generate(self, request, **_kwargs):
+            time.sleep(0.05)
+            return LlmResult(
+                structured=week_assessment(request.payload.menu), model=request.model, attempt=1
+            )
+
+    orchestrator = RunOrchestrator(
+        app_config=app_config(
+            batch=BatchConfig(enabled=True, state_dir=tmp_path / "batch_state"),
+            artifacts=ArtifactConfig(path=tmp_path / "artifacts", retention_days=14, max_runs=10),
+        ),
+        users=users,
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=SlowSyncLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=FakeDiscordClient(),
+        capability_check=_no_capability_check,
+    )
+
+    results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert results[0].status == WorkflowStatus.COMPLETED
+    run_dirs = [d for d in (tmp_path / "artifacts").iterdir() if d.is_dir()]
+    assert len(run_dirs) == 1
+    metadata = json.loads((run_dirs[0] / "metadata.json").read_text())
+    assert metadata["mode"] == "sync_fallback"
+    started_at = datetime.fromisoformat(metadata["started_at"])
+    ended_at = datetime.fromisoformat(metadata["ended_at"])
+    assert (ended_at - started_at).total_seconds() >= 0.05
+
+
+def test_batch_submission_writes_run_metadata_when_no_users_are_pending(tmp_path) -> None:
+    """If every selected user fails during menu fetch, submit_and_process
+    never gets a pending user to submit for batch processing — but a
+    run-level metadata.json should still be written, matching the invariant
+    that a run's metadata.json always exists once batch mode has touched it.
+    """
+    from meal_orchestrator.config.models import ArtifactConfig
+    from meal_orchestrator.providers import MenuUnavailableError
+
+    class MenuUnavailableProvider:
+        provider_id = "example_provider"
+
+        def get_canonical_week_menu(self, request: ProviderMenuRequest):
+            raise MenuUnavailableError("menu not published yet")
+
+    class UnusedLlmClient:
+        def generate(self, request, **_kwargs):
+            raise AssertionError("no user should reach the LLM step")
+
+    users = [_user(tmp_path, "alan")]
+    orchestrator = RunOrchestrator(
+        app_config=app_config(
+            batch=BatchConfig(enabled=True, state_dir=tmp_path / "batch_state"),
+            artifacts=ArtifactConfig(path=tmp_path / "artifacts", retention_days=14, max_runs=10),
+        ),
+        users=users,
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: MenuUnavailableProvider(),
+        llm_client=UnusedLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=FakeDiscordClient(),
+        capability_check=_no_capability_check,
+    )
+
+    results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert results[0].status == WorkflowStatus.MENU_UNAVAILABLE
+    run_dirs = [d for d in (tmp_path / "artifacts").iterdir() if d.is_dir()]
+    assert len(run_dirs) == 1
+    metadata = json.loads((run_dirs[0] / "metadata.json").read_text())
+    assert metadata["mode"] == "empty"
+    assert metadata["users"] == []
 
 
 def test_batch_resume_reports_failure_not_empty_success_when_lock_held(tmp_path) -> None:

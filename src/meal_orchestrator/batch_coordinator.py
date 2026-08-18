@@ -7,6 +7,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
+from meal_orchestrator import __version__
 from meal_orchestrator.artifacts import ArtifactStore
 from meal_orchestrator.batch_runner import (
     PendingBatchState,
@@ -37,6 +38,44 @@ from meal_orchestrator.worker_pool import NotifyOps, run_pool
 from meal_orchestrator.workflow import PendingUser, process_pending_synchronously
 
 logger = logging.getLogger(__name__)
+
+
+def build_run_metadata(
+    *,
+    run_id: str,
+    week_start: date,
+    week_end: date,
+    model: str,
+    users: list[str],
+    mode: str,
+    started_at: datetime,
+    batch_id: str | None = None,
+    batch_status: str | None = None,
+    aggregate_usage: dict[str, Any] | None = None,
+    fallback_reason: str | None = None,
+) -> dict[str, Any]:
+    """Build the run-level metadata.json payload — shared by every mode a run
+    can end up in (plain sync, batch, and every batch-fallback variant) so
+    the schema can't drift between the sync path (`RunOrchestrator`) and the
+    batch path (`BatchCoordinator`).
+    """
+    metadata: dict[str, Any] = {
+        "app_version": __version__,
+        "run_id": run_id,
+        "week_start": week_start.isoformat(),
+        "week_end": week_end.isoformat(),
+        "model": model,
+        "mode": mode,
+        "batch_id": batch_id,
+        "batch_status": batch_status,
+        "aggregate_usage": aggregate_usage,
+        "users": sorted(users),
+        "started_at": started_at.isoformat(),
+        "ended_at": datetime.now(UTC).isoformat(),
+    }
+    if fallback_reason is not None:
+        metadata["fallback_reason"] = fallback_reason
+    return metadata
 
 
 class BatchCoordinator:
@@ -93,6 +132,16 @@ class BatchCoordinator:
         within the current invocation.
         """
         if not pending:
+            self._save_run_metadata(
+                artifact_store,
+                run_id=run_id,
+                week_start=week_start,
+                week_end=week_end,
+                model=model,
+                users=[],
+                mode="empty",
+                started_at=datetime.now(UTC),
+            )
             return {}
         if not self.try_acquire_lock():
             logger.warning(
@@ -103,7 +152,22 @@ class BatchCoordinator:
             self._notify_fallback(
                 discord_client, run_id, "batch submission skipped: run lock already held"
             )
-            return process_pending_synchronously(pending, max_concurrent_users, run_id, notify_ops)
+            fallback_started_at = datetime.now(UTC)
+            results = process_pending_synchronously(
+                pending, max_concurrent_users, run_id, notify_ops
+            )
+            self._save_run_metadata(
+                artifact_store,
+                run_id=run_id,
+                week_start=week_start,
+                week_end=week_end,
+                model=model,
+                users=list(pending),
+                mode="sync_fallback",
+                started_at=fallback_started_at,
+                fallback_reason="run lock already held",
+            )
+            return results
         try:
             rows = self._build_rows(pending, run_id)
             batch_id = submit_batch(rows, api_key=api_key)
@@ -131,6 +195,9 @@ class BatchCoordinator:
                 pending,
                 max_concurrent_users=max_concurrent_users,
                 run_id=run_id,
+                week_start=week_start,
+                week_end=week_end,
+                model=model,
                 notify_ops=notify_ops,
                 discord_client=discord_client,
                 api_key=api_key,
@@ -163,6 +230,9 @@ class BatchCoordinator:
             pending,
             max_concurrent_users=max_concurrent_users,
             run_id=state.run_id,
+            week_start=date.fromisoformat(state.week_start),
+            week_end=date.fromisoformat(state.week_end),
+            model=state.model,
             notify_ops=notify_ops,
             discord_client=discord_client,
             api_key=api_key,
@@ -207,6 +277,9 @@ class BatchCoordinator:
         *,
         max_concurrent_users: int,
         run_id: str,
+        week_start: date,
+        week_end: date,
+        model: str,
         notify_ops: NotifyOps,
         discord_client: DiscordClient,
         api_key: str | None,
@@ -279,12 +352,39 @@ class BatchCoordinator:
             results = process_pending_synchronously(
                 pending, max_concurrent_users, run_id, notify_ops
             )
+            self._save_run_metadata(
+                artifact_store,
+                run_id=run_id,
+                week_start=week_start,
+                week_end=week_end,
+                model=model,
+                users=list(pending),
+                mode="batch_fallback",
+                batch_id=batch_id,
+                batch_status=batch_status(data).value if data is not None else "timed_out",
+                aggregate_usage=data.get("usage") if data is not None else None,
+                started_at=started_at,
+                fallback_reason="batch did not complete in time or failed",
+            )
             clear_state(self._state_dir)
             return results
 
         results, errors = parse_batch_results(rows, data)
         delivered = self._deliver(
             results, errors, pending, max_concurrent_users, run_id, notify_ops, discord_client
+        )
+        self._save_run_metadata(
+            artifact_store,
+            run_id=run_id,
+            week_start=week_start,
+            week_end=week_end,
+            model=model,
+            users=list(pending),
+            mode="batch",
+            batch_id=batch_id,
+            batch_status=batch_status(data).value,
+            aggregate_usage=data.get("usage"),
+            started_at=started_at,
         )
         clear_state(self._state_dir)
         return delivered
@@ -363,6 +463,46 @@ class BatchCoordinator:
             )
 
         return results_by_user_id
+
+    @staticmethod
+    def _save_run_metadata(
+        artifact_store: ArtifactStore,
+        *,
+        run_id: str,
+        week_start: date,
+        week_end: date,
+        model: str,
+        users: list[str],
+        mode: str,
+        started_at: datetime,
+        batch_id: str | None = None,
+        batch_status: str | None = None,
+        aggregate_usage: dict[str, Any] | None = None,
+        fallback_reason: str | None = None,
+    ) -> None:
+        """Write the run-level metadata.json for a run that went through the
+        batch subsystem — covering every exit point (no pending users,
+        lock-skip fallback, not-completed-usably fallback, and a clean batch
+        delivery) so a run's `<run_id>/metadata.json` always exists once
+        batch mode has touched it, carrying the one thing OpenRouter only
+        ever reports in aggregate: the batch's actual cost (`aggregate_usage`).
+        """
+        artifact_store.save_run_metadata(
+            run_id,
+            build_run_metadata(
+                run_id=run_id,
+                week_start=week_start,
+                week_end=week_end,
+                model=model,
+                users=users,
+                mode=mode,
+                started_at=started_at,
+                batch_id=batch_id,
+                batch_status=batch_status,
+                aggregate_usage=aggregate_usage,
+                fallback_reason=fallback_reason,
+            ),
+        )
 
     def _notify_fallback(self, discord_client: DiscordClient, run_id: str, reason: str) -> None:
         webhook_env = self.app_config.delivery.operational_discord_webhook_env

@@ -43,7 +43,7 @@ class DeliveryConfig:
 class ArtifactConfig:
     path: Path
     retention_days: int
-    max_runs_per_user: int
+    max_runs: int
 
 
 @dataclass(frozen=True)

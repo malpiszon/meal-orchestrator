@@ -4,14 +4,14 @@ import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import NamedTuple, Protocol
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from meal_orchestrator.artifacts import ArtifactStore
-from meal_orchestrator.batch_coordinator import BatchCoordinator
+from meal_orchestrator.batch_coordinator import BatchCoordinator, build_run_metadata
 from meal_orchestrator.batch_runner import PendingBatchState
 from meal_orchestrator.config import AppConfig, UserConfig
 from meal_orchestrator.delivery import DiscordClient, EmailClient, build_discord_client
@@ -91,6 +91,7 @@ class RunOrchestrator:
                 return resumed
 
         run_id = uuid4().hex
+        started_at = datetime.now(UTC)
 
         tz = ZoneInfo(self.app_config.runtime.timezone)
         today = datetime.now(tz).date()
@@ -144,6 +145,18 @@ class RunOrchestrator:
         else:
             results_by_user_id.update(
                 process_pending_synchronously(pending, max_concurrent_users, run_id, notify_ops)
+            )
+            clients.artifact_store.save_run_metadata(
+                run_id,
+                build_run_metadata(
+                    run_id=run_id,
+                    week_start=week_start,
+                    week_end=week_end,
+                    model=model,
+                    users=list(pending),
+                    mode="sync",
+                    started_at=started_at,
+                ),
             )
         results = [results_by_user_id[user.id] for user in selected_users]
 
