@@ -7,12 +7,12 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from meal_orchestrator import APP_NAME
 from meal_orchestrator.domain import LlmResult, PromptPayload
 from meal_orchestrator.http import get_json, post_json
 from meal_orchestrator.llm.openrouter import (
     OpenRouterResponseError,
     build_request_body,
+    build_request_headers,
     parse_batch_completion,
 )
 
@@ -140,8 +140,4 @@ def parse_batch_results(
 
 def _headers(api_key: str | None) -> dict[str, str]:
     key = api_key if api_key is not None else os.environ["OPENROUTER_API_KEY"]
-    return {
-        "Authorization": f"Bearer {key}",
-        "Content-Type": "application/json",
-        "X-OpenRouter-Title": APP_NAME,
-    }
+    return build_request_headers(key)
