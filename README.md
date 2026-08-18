@@ -259,25 +259,21 @@ auto-generated notes.
 
 - No web UI or database; everything is driven by CLI + YAML config.
 - Optional OpenRouter batch mode (`llm.batch.enabled`, beta on OpenRouter's
-  side) submits every user's LLM request as one batch for a ~50% token-price
-  discount. A run blocks internally — polling with exponential backoff — for
-  up to `llm.batch.max_wait_hours` instead of returning within minutes, so
-  the scheduler/container running it must allow that long an execution
-  (no extra scheduled job is needed; the single existing trigger just takes
-  longer). If the batch doesn't complete in time, the run automatically
-  falls back to synchronous per-user calls and sends an ops Discord alert.
-  Individual rows within an otherwise-completed batch can also fail (e.g. a
-  malformed response for one user); those are retried synchronously too —
-  with the same full retry/fallback_models resilience a sync-mode call would
-  get — and if any row needed that fallback, one aggregate ops alert names
-  how many/which users, so a systemic batch problem doesn't stay buried in
-  N separate per-user notifications. Disabled by default; always bypassed
-  for dry runs. OpenRouter's batch API
-  has no documented/discoverable cancel endpoint (checked empirically), so
-  a batch that's abandoned on timeout/failure keeps running and billing on
-  OpenRouter's side — the synchronous fallback is a genuine double cost in
-  that case, not just a fallback. Keep `max_wait_hours` comfortably above
-  typical turnaround to make this rare.
+  side, disabled by default, always bypassed for dry runs) submits every
+  user's LLM request as one batch for a ~50% token-price discount. A run
+  blocks internally (backoff-polling) for up to `llm.batch.max_wait_hours`
+  instead of returning within minutes, so the scheduler/container running it
+  must allow that long an execution. On timeout or failure it falls back to
+  synchronous per-user calls (with an ops Discord alert); a batch row that
+  individually fails or is missing gets that same synchronous retry +
+  fallback_models resilience, with one aggregate alert if any row needed it.
+  `llm.batch.state_dir` (required when enabled) holds the durable resume
+  state and cross-process lock — point it at a persistent mount, the same
+  one `artifacts.path` uses, not the container's ephemeral working
+  directory, or a crash loses the ability to resume. OpenRouter has no
+  cancel-batch endpoint, so an abandoned batch keeps billing after a timeout
+  fallback — keep `max_wait_hours` comfortably above typical turnaround to
+  make that rare.
 - If any purchased meal is missing for any day in the target week, that
   user's entire run is treated as menu-unavailable — there's no
   partial-week handling.

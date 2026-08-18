@@ -41,8 +41,10 @@ def _no_capability_check(model: str, **_kwargs) -> None:
     pass
 
 
-def _batch_app_config(**batch_kwargs) -> AppConfig:
-    return app_config(batch=BatchConfig(enabled=True, **batch_kwargs))
+def _batch_app_config(tmp_path, **batch_kwargs) -> AppConfig:
+    return app_config(
+        batch=BatchConfig(enabled=True, state_dir=tmp_path / ".batch_state", **batch_kwargs)
+    )
 
 
 def test_batch_state_persists_through_delivery_not_cleared_before_it(tmp_path, monkeypatch) -> None:
@@ -104,7 +106,7 @@ def test_batch_state_persists_through_delivery_not_cleared_before_it(tmp_path, m
             raise AssertionError("synchronous LLM client must not be used when batch succeeds")
 
     orchestrator = RunOrchestrator(
-        app_config=_batch_app_config(),
+        app_config=_batch_app_config(tmp_path),
         users=users,
         project_root=tmp_path,
         provider_factory=lambda provider_id: RecordingProvider(),
@@ -166,7 +168,7 @@ def test_batch_mode_submits_polls_and_delivers(tmp_path, monkeypatch) -> None:
 
     email_client = FakeEmailClient()
     orchestrator = RunOrchestrator(
-        app_config=_batch_app_config(),
+        app_config=_batch_app_config(tmp_path),
         users=users,
         project_root=tmp_path,
         provider_factory=lambda provider_id: RecordingProvider(),
@@ -222,7 +224,8 @@ def test_batch_mode_retries_row_failures_synchronously_with_fallback_models(
     discord = FakeDiscordClient()
     orchestrator = RunOrchestrator(
         app_config=app_config(
-            fallback_models=["fallback-model"], batch=BatchConfig(enabled=True)
+            fallback_models=["fallback-model"],
+            batch=BatchConfig(enabled=True, state_dir=tmp_path / ".batch_state"),
         ),
         users=users,
         project_root=tmp_path,
@@ -306,7 +309,7 @@ def test_batch_mode_single_row_failure_still_sends_aggregate_alert(tmp_path, mon
 
     discord = FakeDiscordClient()
     orchestrator = RunOrchestrator(
-        app_config=_batch_app_config(),
+        app_config=_batch_app_config(tmp_path),
         users=users,
         project_root=tmp_path,
         provider_factory=lambda provider_id: RecordingProvider(),
@@ -372,7 +375,7 @@ def test_batch_mode_no_aggregate_alert_when_every_row_succeeds(tmp_path, monkeyp
 
     discord = FakeDiscordClient()
     orchestrator = RunOrchestrator(
-        app_config=_batch_app_config(),
+        app_config=_batch_app_config(tmp_path),
         users=users,
         project_root=tmp_path,
         provider_factory=lambda provider_id: RecordingProvider(),
@@ -411,7 +414,7 @@ def test_batch_mode_falls_back_to_sync_when_batch_times_out(tmp_path, monkeypatc
     discord = FakeDiscordClient()
 
     orchestrator = RunOrchestrator(
-        app_config=_batch_app_config(),
+        app_config=_batch_app_config(tmp_path),
         users=users,
         project_root=tmp_path,
         provider_factory=lambda provider_id: RecordingProvider(),
@@ -443,7 +446,7 @@ def test_batch_resume_deadline_counts_from_original_submission_not_resume_time(
 
     long_expired_submission = (datetime.now(UTC) - timedelta(hours=5)).isoformat()
     save_state(
-        tmp_path,
+        tmp_path / ".batch_state",
         PendingBatchState(
             run_id="run-resume",
             batch_id="batch-existing",
@@ -470,7 +473,7 @@ def test_batch_resume_deadline_counts_from_original_submission_not_resume_time(
             )
 
     orchestrator = RunOrchestrator(
-        app_config=_batch_app_config(max_wait_hours=1),
+        app_config=_batch_app_config(tmp_path, max_wait_hours=1),
         users=[_user(tmp_path, "alan")],
         project_root=tmp_path,
         provider_factory=lambda provider_id: RecordingProvider(),
@@ -492,7 +495,7 @@ def test_batch_resume_deadline_counts_from_original_submission_not_resume_time(
 def test_batch_mode_resumes_pending_state_instead_of_resubmitting(tmp_path, monkeypatch) -> None:
     users = [_user(tmp_path, "alan")]
     save_state(
-        tmp_path,
+        tmp_path / ".batch_state",
         PendingBatchState(
             run_id="run-resume",
             batch_id="batch-existing",
@@ -546,7 +549,7 @@ def test_batch_mode_resumes_pending_state_instead_of_resubmitting(tmp_path, monk
 
     email_client = FakeEmailClient()
     orchestrator = RunOrchestrator(
-        app_config=_batch_app_config(),
+        app_config=_batch_app_config(tmp_path),
         users=users,
         project_root=tmp_path,
         provider_factory=lambda provider_id: RecordingProvider(),
@@ -575,7 +578,7 @@ def test_batch_resume_warns_when_a_pending_user_was_removed_from_config(
 
     users = [_user(tmp_path, "alan")]  # "bob" was removed from config
     save_state(
-        tmp_path,
+        tmp_path / ".batch_state",
         PendingBatchState(
             run_id="run-resume",
             batch_id="batch-existing",
@@ -628,7 +631,7 @@ def test_batch_resume_warns_when_a_pending_user_was_removed_from_config(
             raise AssertionError("synchronous LLM client must not be used on batch resume")
 
     orchestrator = RunOrchestrator(
-        app_config=_batch_app_config(),
+        app_config=_batch_app_config(tmp_path),
         users=users,
         project_root=tmp_path,
         provider_factory=lambda provider_id: RecordingProvider(),
@@ -663,7 +666,7 @@ def test_batch_mode_skipped_for_dry_run(tmp_path, monkeypatch) -> None:
             )
 
     orchestrator = RunOrchestrator(
-        app_config=_batch_app_config(),
+        app_config=_batch_app_config(tmp_path),
         users=users,
         project_root=tmp_path,
         provider_factory=lambda provider_id: RecordingProvider(),
@@ -683,7 +686,7 @@ def test_batch_submission_falls_back_to_sync_when_lock_already_held(tmp_path, mo
 
     monkeypatch.setenv("DISCORD_OPS_WEBHOOK_URL", "https://example.com/ops")
     users = [_user(tmp_path, "alan")]
-    assert acquire_lock(tmp_path) is True  # simulate another invocation already running
+    assert acquire_lock(tmp_path / ".batch_state") is True  # simulate another invocation running
 
     class SyncLlmClient:
         def generate(self, request, **_kwargs):
@@ -693,7 +696,7 @@ def test_batch_submission_falls_back_to_sync_when_lock_already_held(tmp_path, mo
 
     discord = FakeDiscordClient()
     orchestrator = RunOrchestrator(
-        app_config=_batch_app_config(),
+        app_config=_batch_app_config(tmp_path),
         users=users,
         project_root=tmp_path,
         provider_factory=lambda provider_id: RecordingProvider(),
@@ -723,7 +726,7 @@ def test_batch_resume_reports_failure_not_empty_success_when_lock_held(tmp_path)
     from meal_orchestrator.batch_runner import acquire_lock
 
     save_state(
-        tmp_path,
+        tmp_path / ".batch_state",
         PendingBatchState(
             run_id="run-locked",
             batch_id="batch-locked",
@@ -734,14 +737,14 @@ def test_batch_resume_reports_failure_not_empty_success_when_lock_held(tmp_path)
             users=[PendingBatchUser(user_id="alan", custom_id="run-locked:alan")],
         ),
     )
-    assert acquire_lock(tmp_path) is True  # simulate another invocation already running
+    assert acquire_lock(tmp_path / ".batch_state") is True  # simulate another invocation running
 
     class UnusedLlmClient:
         def generate(self, request, **_kwargs):
             raise AssertionError("must not process anything while locked")
 
     orchestrator = RunOrchestrator(
-        app_config=_batch_app_config(),
+        app_config=_batch_app_config(tmp_path),
         users=[_user(tmp_path, "alan")],
         project_root=tmp_path,
         provider_factory=lambda provider_id: RecordingProvider(),
@@ -760,8 +763,8 @@ def test_batch_resume_reports_failure_not_empty_success_when_lock_held(tmp_path)
 
 
 def test_batch_submission_degrades_to_sync_when_state_dir_unwritable(tmp_path) -> None:
-    """If .batch_state can't be created (e.g. read-only project root), the run
-    must fall back to synchronous processing instead of crashing outright.
+    """If llm.batch.state_dir can't be created (e.g. read-only/unmounted), the
+    run must fall back to synchronous processing instead of crashing outright.
     """
     users = [_user(tmp_path, "alan")]
     # Create a plain file where the state directory would go, so mkdir(parents=True)
@@ -775,7 +778,7 @@ def test_batch_submission_degrades_to_sync_when_state_dir_unwritable(tmp_path) -
             )
 
     orchestrator = RunOrchestrator(
-        app_config=_batch_app_config(),
+        app_config=_batch_app_config(tmp_path),
         users=users,
         project_root=tmp_path,
         provider_factory=lambda provider_id: RecordingProvider(),

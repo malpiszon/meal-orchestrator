@@ -13,19 +13,13 @@ llm:
   max_retries: 3
   fallback_models:
     - "google/gemini-3.1-flash-lite"
-  # OpenRouter batch mode (beta): submits all users' LLM requests as one batch
-  # for a ~50% token-price discount, at the cost of a run taking up to
-  # max_wait_hours to finish instead of returning within minutes. The run
-  # blocks and polls internally (exponential backoff between
-  # initial_poll_interval_seconds and max_poll_interval_seconds) — no
-  # separate scheduled job is needed. If the batch doesn't complete in time,
-  # the run automatically falls back to synchronous per-user calls so users
-  # still get their plan, and sends an ops Discord alert. Disabled by default.
-  # NOTE: OpenRouter has no cancel-batch endpoint (verified empirically), so an
-  # abandoned batch keeps running/billing after a timeout fallback — that's a
-  # genuine double cost, not just a safety net. Keep max_wait_hours generous.
+  # OpenRouter batch mode (beta, ~50% cheaper, blocks a run for up to
+  # max_wait_hours). Disabled by default — see README's Known limitations.
   batch:
     enabled: false
+    # Durable resume state + run lock; required when enabled. Needs a
+    # persistent mount, same as artifacts.path below, to survive restarts.
+    state_dir: "/data/.batch_state"
     initial_poll_interval_seconds: 120
     max_poll_interval_seconds: 3600
     max_wait_hours: 26

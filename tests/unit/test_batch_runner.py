@@ -41,7 +41,6 @@ def test_load_state_ignores_corrupt_file(tmp_path) -> None:
     from meal_orchestrator.batch_runner import state_file_path
 
     path = state_file_path(tmp_path)
-    path.parent.mkdir(parents=True)
     path.write_text("not json", encoding="utf-8")
 
     assert load_state(tmp_path) is None
@@ -49,17 +48,19 @@ def test_load_state_ignores_corrupt_file(tmp_path) -> None:
 
 def test_save_state_does_not_raise_when_state_dir_unwritable(tmp_path) -> None:
     # A plain file where the state directory would go makes mkdir(parents=True) fail.
-    (tmp_path / ".batch_state").write_text("not a directory", encoding="utf-8")
+    state_dir = tmp_path / "state"
+    state_dir.write_text("not a directory", encoding="utf-8")
 
-    save_state(tmp_path, _state())  # must not raise
+    save_state(state_dir, _state())  # must not raise
 
-    assert load_state(tmp_path) is None
+    assert load_state(state_dir) is None
 
 
 def test_acquire_lock_returns_false_when_state_dir_unwritable(tmp_path) -> None:
-    (tmp_path / ".batch_state").write_text("not a directory", encoding="utf-8")
+    state_dir = tmp_path / "state"
+    state_dir.write_text("not a directory", encoding="utf-8")
 
-    assert acquire_lock(tmp_path) is False  # must not raise
+    assert acquire_lock(state_dir) is False  # must not raise
 
 
 def test_acquire_lock_blocks_second_caller_then_releases(tmp_path) -> None:

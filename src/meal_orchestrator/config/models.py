@@ -15,6 +15,7 @@ class RuntimeConfig:
 @dataclass(frozen=True)
 class BatchConfig:
     enabled: bool = False
+    state_dir: Path | None = None
     initial_poll_interval_seconds: int = 120
     max_poll_interval_seconds: int = 3600
     max_wait_hours: int = 26

@@ -81,7 +81,7 @@ class RunOrchestrator:
         self.email_client_override = email_client
         self.discord_client_override = discord_client
         self.capability_check_override = capability_check
-        self.batch_coordinator = BatchCoordinator(app_config=app_config, project_root=project_root)
+        self.batch_coordinator = BatchCoordinator(app_config=app_config)
 
     def run(self, options: RunOptions) -> list[WorkflowResult]:
         batch_enabled = self.app_config.llm.batch.enabled and not options.dry_run

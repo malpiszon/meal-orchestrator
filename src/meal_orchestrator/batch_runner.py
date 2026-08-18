@@ -15,7 +15,6 @@ from meal_orchestrator.config.models import BatchConfig
 
 logger = logging.getLogger(__name__)
 
-_STATE_DIR_NAME = ".batch_state"
 _STATE_FILE_NAME = "pending_batch.json"
 _LOCK_FILE_NAME = "run.lock"
 
@@ -43,23 +42,19 @@ class PendingBatchState:
     users: list[PendingBatchUser]
 
 
-def _state_dir(project_root: Path) -> Path:
-    return project_root / _STATE_DIR_NAME
+def state_file_path(state_dir: Path) -> Path:
+    return state_dir / _STATE_FILE_NAME
 
 
-def state_file_path(project_root: Path) -> Path:
-    return _state_dir(project_root) / _STATE_FILE_NAME
-
-
-def save_state(project_root: Path, state: PendingBatchState) -> None:
+def save_state(state_dir: Path, state: PendingBatchState) -> None:
     """Persist `state`, best-effort.
 
-    A failure here (e.g. a read-only project root) must not crash the run —
-    it only means a crash during the wait loop won't be resumable, which is
-    strictly worse than not persisting but still far better than the whole
-    run failing outright.
+    A failure here (e.g. a read-only/unmounted state_dir) must not crash the
+    run — it only means a crash during the wait loop won't be resumable,
+    which is strictly worse than not persisting but still far better than
+    the whole run failing outright.
     """
-    path = state_file_path(project_root)
+    path = state_file_path(state_dir)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(asdict(state), indent=2), encoding="utf-8")
@@ -72,8 +67,8 @@ def save_state(project_root: Path, state: PendingBatchState) -> None:
         )
 
 
-def load_state(project_root: Path) -> PendingBatchState | None:
-    path = state_file_path(project_root)
+def load_state(state_dir: Path) -> PendingBatchState | None:
+    path = state_file_path(state_dir)
     if not path.exists():
         return None
     try:
@@ -94,16 +89,16 @@ def load_state(project_root: Path) -> PendingBatchState | None:
         return None
 
 
-def clear_state(project_root: Path) -> None:
-    state_file_path(project_root).unlink(missing_ok=True)
+def clear_state(state_dir: Path) -> None:
+    state_file_path(state_dir).unlink(missing_ok=True)
 
 
-def acquire_lock(project_root: Path) -> bool:
+def acquire_lock(state_dir: Path) -> bool:
     """Best-effort guard against two invocations both running a blocking batch
     wait at once. Returns False if another live process already holds the
-    lock, or if the lock can't be acquired at all (e.g. a read-only project
-    root) — either way, callers treat False as "can't do the durable/
-    coordinated thing right now" and fall back accordingly.
+    lock, or if the lock can't be acquired at all (e.g. a read-only/
+    unmounted state_dir) — either way, callers treat False as "can't do the
+    durable/coordinated thing right now" and fall back accordingly.
 
     Uses an atomic create-then-link for the actual acquisition (see
     `_try_create_lock_file`) so two processes racing to acquire at the same
@@ -111,7 +106,7 @@ def acquire_lock(project_root: Path) -> bool:
     window where both would see "no lock" and both proceed, defeating the
     whole point of the lock.
     """
-    lock_path = _state_dir(project_root) / _LOCK_FILE_NAME
+    lock_path = state_dir / _LOCK_FILE_NAME
     try:
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         if _try_create_lock_file(lock_path):
@@ -165,8 +160,8 @@ def _lock_holder_is_alive(lock_path: Path) -> bool:
     return True
 
 
-def release_lock(project_root: Path) -> None:
-    (_state_dir(project_root) / _LOCK_FILE_NAME).unlink(missing_ok=True)
+def release_lock(state_dir: Path) -> None:
+    (state_dir / _LOCK_FILE_NAME).unlink(missing_ok=True)
 
 
 def poll_until_terminal(

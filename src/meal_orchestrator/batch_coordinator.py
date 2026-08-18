@@ -49,18 +49,27 @@ class BatchCoordinator:
     OpenRouter's batch API.
     """
 
-    def __init__(self, *, app_config: AppConfig, project_root: Path) -> None:
+    def __init__(self, *, app_config: AppConfig) -> None:
         self.app_config = app_config
-        self.project_root = project_root
+
+    @property
+    def _state_dir(self) -> Path:
+        state_dir = self.app_config.llm.batch.state_dir
+        assert state_dir is not None, (
+            "BatchCoordinator used without llm.batch.state_dir configured — the config "
+            "loader requires it whenever llm.batch.enabled is true, and callers must not "
+            "reach here otherwise"
+        )
+        return state_dir
 
     def find_pending_state(self) -> PendingBatchState | None:
-        return load_state(self.project_root)
+        return load_state(self._state_dir)
 
     def try_acquire_lock(self) -> bool:
-        return acquire_lock(self.project_root)
+        return acquire_lock(self._state_dir)
 
     def release_lock(self) -> None:
-        release_lock(self.project_root)
+        release_lock(self._state_dir)
 
     def submit_and_process(
         self,
@@ -97,7 +106,7 @@ class BatchCoordinator:
             batch_id = submit_batch(rows, api_key=api_key)
             submitted_at = datetime.now(UTC)
             save_state(
-                self.project_root,
+                self._state_dir,
                 PendingBatchState(
                     run_id=run_id,
                     batch_id=batch_id,
@@ -233,14 +242,14 @@ class BatchCoordinator:
             results = process_pending_synchronously(
                 pending, max_concurrent_users, run_id, notify_ops
             )
-            clear_state(self.project_root)
+            clear_state(self._state_dir)
             return results
 
         results, errors = parse_batch_results(rows, data)
         delivered = self._deliver(
             results, errors, pending, max_concurrent_users, run_id, notify_ops, discord_client
         )
-        clear_state(self.project_root)
+        clear_state(self._state_dir)
         return delivered
 
     def _deliver(
