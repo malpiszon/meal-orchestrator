@@ -148,6 +148,45 @@ def test_orchestrator_uses_provider_override(tmp_path) -> None:
     assert provider.requests[0].provider_offering_id == 123
 
 
+def test_orchestrator_writes_run_level_metadata_for_sync_run(tmp_path) -> None:
+    """A plain (non-batch) run must also leave a run-level metadata.json —
+    built via the same `build_run_metadata` shared with BatchCoordinator, so
+    the schema (batch_id/batch_status/aggregate_usage present as null rather
+    than absent) can't drift between the two modes.
+    """
+    import json
+
+    from meal_orchestrator.config.models import ArtifactConfig
+
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+
+    orchestrator = RunOrchestrator(
+        app_config=app_config(
+            artifacts=ArtifactConfig(path=tmp_path / "artifacts", retention_days=14, max_runs=10)
+        ),
+        users=[user_config(prompt_file.relative_to(tmp_path))],
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=FakeLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=FakeDiscordClient(),
+        capability_check=_no_capability_check,
+    )
+
+    result = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert result[0].status == WorkflowStatus.COMPLETED
+    run_dirs = [d for d in (tmp_path / "artifacts").iterdir() if d.is_dir()]
+    assert len(run_dirs) == 1
+    metadata = json.loads((run_dirs[0] / "metadata.json").read_text())
+    assert metadata["mode"] == "sync"
+    assert metadata["batch_id"] is None
+    assert metadata["batch_status"] is None
+    assert metadata["aggregate_usage"] is None
+    assert metadata["users"] == [user_config(prompt_file.relative_to(tmp_path)).id]
+
+
 def test_orchestrator_sends_operational_notification_on_completed(tmp_path, monkeypatch) -> None:
     prompt_file = tmp_path / "prompt.md"
     prompt_file.write_text("Choose meals.", encoding="utf-8")

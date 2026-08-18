@@ -40,6 +40,44 @@ from meal_orchestrator.workflow import PendingUser, process_pending_synchronousl
 logger = logging.getLogger(__name__)
 
 
+def build_run_metadata(
+    *,
+    run_id: str,
+    week_start: date,
+    week_end: date,
+    model: str,
+    users: list[str],
+    mode: str,
+    started_at: datetime,
+    batch_id: str | None = None,
+    batch_status: str | None = None,
+    aggregate_usage: dict[str, Any] | None = None,
+    fallback_reason: str | None = None,
+) -> dict[str, Any]:
+    """Build the run-level metadata.json payload — shared by every mode a run
+    can end up in (plain sync, batch, and every batch-fallback variant) so
+    the schema can't drift between the sync path (`RunOrchestrator`) and the
+    batch path (`BatchCoordinator`).
+    """
+    metadata: dict[str, Any] = {
+        "app_version": __version__,
+        "run_id": run_id,
+        "week_start": week_start.isoformat(),
+        "week_end": week_end.isoformat(),
+        "model": model,
+        "mode": mode,
+        "batch_id": batch_id,
+        "batch_status": batch_status,
+        "aggregate_usage": aggregate_usage,
+        "users": sorted(users),
+        "started_at": started_at.isoformat(),
+        "ended_at": datetime.now(UTC).isoformat(),
+    }
+    if fallback_reason is not None:
+        metadata["fallback_reason"] = fallback_reason
+    return metadata
+
+
 class BatchCoordinator:
     """Owns the OpenRouter batch subsystem: durable state, the cross-process
     run lock, submission, resumption after a crash, polling with a
@@ -94,6 +132,16 @@ class BatchCoordinator:
         within the current invocation.
         """
         if not pending:
+            self._save_run_metadata(
+                artifact_store,
+                run_id=run_id,
+                week_start=week_start,
+                week_end=week_end,
+                model=model,
+                users=[],
+                mode="empty",
+                started_at=datetime.now(UTC),
+            )
             return {}
         if not self.try_acquire_lock():
             logger.warning(
@@ -104,10 +152,10 @@ class BatchCoordinator:
             self._notify_fallback(
                 discord_client, run_id, "batch submission skipped: run lock already held"
             )
+            fallback_started_at = datetime.now(UTC)
             results = process_pending_synchronously(
                 pending, max_concurrent_users, run_id, notify_ops
             )
-            now = datetime.now(UTC)
             self._save_run_metadata(
                 artifact_store,
                 run_id=run_id,
@@ -116,10 +164,7 @@ class BatchCoordinator:
                 model=model,
                 users=list(pending),
                 mode="sync_fallback",
-                batch_id=None,
-                batch_status=None,
-                aggregate_usage=None,
-                started_at=now,
+                started_at=fallback_started_at,
                 fallback_reason="run lock already held",
             )
             return results
@@ -429,36 +474,35 @@ class BatchCoordinator:
         model: str,
         users: list[str],
         mode: str,
-        batch_id: str | None,
-        batch_status: str | None,
-        aggregate_usage: dict[str, Any] | None,
         started_at: datetime,
+        batch_id: str | None = None,
+        batch_status: str | None = None,
+        aggregate_usage: dict[str, Any] | None = None,
         fallback_reason: str | None = None,
     ) -> None:
         """Write the run-level metadata.json for a run that went through the
-        batch subsystem — covering every exit point (lock-skip fallback,
-        not-completed-usably fallback, and a clean batch delivery) so a run's
-        `<run_id>/metadata.json` always exists once batch mode has touched it,
-        carrying the one thing OpenRouter only ever reports in aggregate: the
-        batch's actual cost (`aggregate_usage`).
+        batch subsystem — covering every exit point (no pending users,
+        lock-skip fallback, not-completed-usably fallback, and a clean batch
+        delivery) so a run's `<run_id>/metadata.json` always exists once
+        batch mode has touched it, carrying the one thing OpenRouter only
+        ever reports in aggregate: the batch's actual cost (`aggregate_usage`).
         """
-        metadata: dict[str, Any] = {
-            "app_version": __version__,
-            "run_id": run_id,
-            "week_start": week_start.isoformat(),
-            "week_end": week_end.isoformat(),
-            "model": model,
-            "mode": mode,
-            "batch_id": batch_id,
-            "batch_status": batch_status,
-            "aggregate_usage": aggregate_usage,
-            "users": sorted(users),
-            "started_at": started_at.isoformat(),
-            "ended_at": datetime.now(UTC).isoformat(),
-        }
-        if fallback_reason is not None:
-            metadata["fallback_reason"] = fallback_reason
-        artifact_store.save_run_metadata(run_id, metadata)
+        artifact_store.save_run_metadata(
+            run_id,
+            build_run_metadata(
+                run_id=run_id,
+                week_start=week_start,
+                week_end=week_end,
+                model=model,
+                users=users,
+                mode=mode,
+                started_at=started_at,
+                batch_id=batch_id,
+                batch_status=batch_status,
+                aggregate_usage=aggregate_usage,
+                fallback_reason=fallback_reason,
+            ),
+        )
 
     def _notify_fallback(self, discord_client: DiscordClient, run_id: str, reason: str) -> None:
         webhook_env = self.app_config.delivery.operational_discord_webhook_env

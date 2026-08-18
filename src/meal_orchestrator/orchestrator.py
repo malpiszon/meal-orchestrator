@@ -10,9 +10,8 @@ from typing import NamedTuple, Protocol
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
-from meal_orchestrator import __version__
 from meal_orchestrator.artifacts import ArtifactStore
-from meal_orchestrator.batch_coordinator import BatchCoordinator
+from meal_orchestrator.batch_coordinator import BatchCoordinator, build_run_metadata
 from meal_orchestrator.batch_runner import PendingBatchState
 from meal_orchestrator.config import AppConfig, UserConfig
 from meal_orchestrator.delivery import DiscordClient, EmailClient, build_discord_client
@@ -149,17 +148,15 @@ class RunOrchestrator:
             )
             clients.artifact_store.save_run_metadata(
                 run_id,
-                {
-                    "app_version": __version__,
-                    "run_id": run_id,
-                    "week_start": week_start.isoformat(),
-                    "week_end": week_end.isoformat(),
-                    "model": model,
-                    "mode": "sync",
-                    "users": sorted(pending),
-                    "started_at": started_at.isoformat(),
-                    "ended_at": datetime.now(UTC).isoformat(),
-                },
+                build_run_metadata(
+                    run_id=run_id,
+                    week_start=week_start,
+                    week_end=week_end,
+                    model=model,
+                    users=list(pending),
+                    mode="sync",
+                    started_at=started_at,
+                ),
             )
         results = [results_by_user_id[user.id] for user in selected_users]
 
