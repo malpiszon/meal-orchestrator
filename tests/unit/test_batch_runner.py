@@ -181,6 +181,32 @@ def test_poll_until_terminal_backs_off_then_completes() -> None:
     assert sleeps == [1, 2]
 
 
+def test_poll_until_terminal_logs_every_successful_check(caplog) -> None:
+    """Over a wait that can span hours, a per-check log line (not just the
+    eventual completion/fallback one) is the only visibility into progress —
+    each successful check, pending or terminal, must be logged.
+    """
+    import logging
+
+    config = BatchConfig(initial_poll_interval_seconds=1, max_poll_interval_seconds=10)
+    statuses = iter(["in_progress", "completed"])
+
+    with caplog.at_level(logging.INFO):
+        result = poll_until_terminal(
+            "batch-1",
+            config,
+            get_batch=lambda batch_id: {"status": next(statuses)},
+            is_pending=lambda data: data["status"] != "completed",
+            sleep=lambda seconds: None,
+        )
+
+    assert result == {"status": "completed"}
+    check_logs = [r for r in caplog.records if "batch status check" in r.message]
+    assert len(check_logs) == 2
+    assert check_logs[0].pending is True
+    assert check_logs[1].pending is False
+
+
 def test_poll_until_terminal_survives_a_transient_error_and_keeps_polling() -> None:
     """A single network blip / transient HTTP error fetching batch status must
     not crash the whole (potentially many-hours-long) wait — it should be

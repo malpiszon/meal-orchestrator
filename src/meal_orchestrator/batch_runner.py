@@ -196,6 +196,11 @@ def poll_until_terminal(
     and treated as an inconclusive/pending check instead; persistent failures
     are still bounded by `max_wait_hours`, which lets the caller's existing
     timeout-fallback path take over.
+
+    Every successful check is also logged (including the raw response) —
+    over a wait that can span hours, that's the only visibility into
+    progress (e.g. OpenRouter's `request_counts`) between "submitted" and
+    the eventual completion/fallback log line.
     """
     deadline = (started_at or datetime.now(UTC)).timestamp() + config.max_wait_hours * 3600
     # Clamped defensively in case initial > max (loader.py validates this too, but
@@ -214,7 +219,14 @@ def poll_until_terminal(
                 exc_info=True,
             )
         else:
-            if not is_pending(data):
+            pending = is_pending(data)
+            logger.info(
+                "batch status check: batch_id=%s pending=%s",
+                batch_id,
+                pending,
+                extra={"batch_id": batch_id, "pending": pending, "batch_data": data},
+            )
+            if not pending:
                 return data
         if time.time() >= deadline:
             return None
