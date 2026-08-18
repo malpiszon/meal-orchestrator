@@ -85,6 +85,10 @@ def _parse_batch(data: dict[str, Any]) -> BatchConfig:
     if enabled and state_dir_raw is None:
         raise ConfigError("llm.batch.state_dir is required when llm.batch.enabled is true")
     state_dir = Path(str(state_dir_raw)) if state_dir_raw is not None else None
+    initial_check_delay_seconds = _non_negative_int(
+        raw.get("initial_check_delay_seconds", defaults.initial_check_delay_seconds),
+        "llm.batch.initial_check_delay_seconds",
+    )
     initial_poll_interval_seconds = _positive_int(
         raw.get("initial_poll_interval_seconds", defaults.initial_poll_interval_seconds),
         "llm.batch.initial_poll_interval_seconds",
@@ -101,6 +105,7 @@ def _parse_batch(data: dict[str, Any]) -> BatchConfig:
     return BatchConfig(
         enabled=enabled,
         state_dir=state_dir,
+        initial_check_delay_seconds=initial_check_delay_seconds,
         initial_poll_interval_seconds=initial_poll_interval_seconds,
         max_poll_interval_seconds=max_poll_interval_seconds,
         max_wait_hours=_positive_int(
@@ -112,6 +117,12 @@ def _parse_batch(data: dict[str, Any]) -> BatchConfig:
 def _positive_int(value: Any, field_name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise ConfigError(f"{field_name} must be a positive integer")
+    return value
+
+
+def _non_negative_int(value: Any, field_name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ConfigError(f"{field_name} must be a non-negative integer")
     return value
 
 

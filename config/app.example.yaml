@@ -20,6 +20,7 @@ llm:
     # Durable resume state + run lock; required when enabled. Needs a
     # persistent mount, same as artifacts.path below, to survive restarts.
     state_dir: "/data/batch_state"
+    initial_check_delay_seconds: 15
     initial_poll_interval_seconds: 120
     max_poll_interval_seconds: 3600
     max_wait_hours: 26

@@ -172,6 +172,7 @@ def poll_until_terminal(
     is_pending: Any,
     sleep: Any = time.sleep,
     started_at: datetime | None = None,
+    initial_check_delay_seconds: float = 0.0,
 ) -> dict[str, Any] | None:
     """Poll `get_batch(batch_id)` with exponential backoff until it leaves the
     pending states, or `max_wait_hours` elapses (returns None on timeout).
@@ -180,6 +181,14 @@ def poll_until_terminal(
     is capped at `max_poll_interval_seconds` — matched to typical batch
     turnaround (seconds to minutes) without hammering the API if a batch runs
     long.
+
+    `initial_check_delay_seconds` waits before that first check instead of
+    checking immediately — pass `config.initial_check_delay_seconds` right
+    after a fresh submission, since OpenRouter's batch API isn't reliably
+    queryable that fast (observed: an immediate GET 404s even though the
+    batch was just created seconds earlier, which only ever wastes the first
+    check, not a real failure). Leave at 0 when resuming a possibly-
+    already-finished batch, so it's picked up without an unnecessary wait.
 
     A single status check can fail (network blip, transient HTTP error,
     malformed response body) without ending the wait — over a loop that can
@@ -192,6 +201,8 @@ def poll_until_terminal(
     # Clamped defensively in case initial > max (loader.py validates this too, but
     # a caller could construct BatchConfig directly without going through it).
     interval = min(config.initial_poll_interval_seconds, config.max_poll_interval_seconds)
+    if initial_check_delay_seconds > 0:
+        sleep(min(initial_check_delay_seconds, max(0.0, deadline - time.time())))
     while True:
         try:
             data = get_batch(batch_id)

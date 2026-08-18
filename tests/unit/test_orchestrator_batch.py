@@ -42,6 +42,11 @@ def _no_capability_check(model: str, **_kwargs) -> None:
 
 
 def _batch_app_config(tmp_path, **batch_kwargs) -> AppConfig:
+    # 0 so `poll_until_terminal`'s pre-first-check delay/backoff (real
+    # time.sleep, not injectable through the orchestrator) doesn't actually
+    # slow tests down.
+    batch_kwargs.setdefault("initial_check_delay_seconds", 0)
+    batch_kwargs.setdefault("initial_poll_interval_seconds", 0)
     return app_config(
         batch=BatchConfig(enabled=True, state_dir=tmp_path / "batch_state", **batch_kwargs)
     )
@@ -225,7 +230,12 @@ def test_batch_mode_retries_row_failures_synchronously_with_fallback_models(
     orchestrator = RunOrchestrator(
         app_config=app_config(
             fallback_models=["fallback-model"],
-            batch=BatchConfig(enabled=True, state_dir=tmp_path / "batch_state"),
+            batch=BatchConfig(
+                enabled=True,
+                state_dir=tmp_path / "batch_state",
+                initial_check_delay_seconds=0,
+                initial_poll_interval_seconds=0,
+            ),
         ),
         users=users,
         project_root=tmp_path,

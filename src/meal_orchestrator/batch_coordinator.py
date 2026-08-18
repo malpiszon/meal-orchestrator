@@ -132,6 +132,7 @@ class BatchCoordinator:
                 discord_client=discord_client,
                 api_key=api_key,
                 started_at=submitted_at,
+                initial_check_delay_seconds=self.app_config.llm.batch.initial_check_delay_seconds,
             )
         finally:
             self.release_lock()
@@ -204,6 +205,7 @@ class BatchCoordinator:
         discord_client: DiscordClient,
         api_key: str | None,
         started_at: datetime,
+        initial_check_delay_seconds: float = 0.0,
     ) -> dict[str, WorkflowResult]:
         """`started_at` must be the batch's original submission time (not "now"),
         so max_wait_hours bounds the total wait from submission — otherwise a
@@ -218,6 +220,7 @@ class BatchCoordinator:
             get_batch=lambda bid: get_batch(bid, api_key=api_key),
             is_pending=lambda d: batch_status(d) in PENDING_STATUSES,
             started_at=started_at,
+            initial_check_delay_seconds=initial_check_delay_seconds,
         )
 
         # State is kept alive through delivery (not cleared right after polling
@@ -233,6 +236,10 @@ class BatchCoordinator:
                     "run_id": run_id,
                     "batch_id": batch_id,
                     "status": batch_status(data).value if data is not None else "timed_out",
+                    # Whatever OpenRouter returned alongside a non-completed status (e.g. an
+                    # error/reason field) — the exact shape isn't documented, so surface the
+                    # raw batch data rather than guessing at field names and dropping detail.
+                    "batch_data": data,
                     "step": "batch_fallback",
                 },
             )

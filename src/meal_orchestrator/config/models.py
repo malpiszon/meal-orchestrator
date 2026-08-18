@@ -16,6 +16,7 @@ class RuntimeConfig:
 class BatchConfig:
     enabled: bool = False
     state_dir: Path | None = None
+    initial_check_delay_seconds: int = 15
     initial_poll_interval_seconds: int = 120
     max_poll_interval_seconds: int = 3600
     max_wait_hours: int = 26

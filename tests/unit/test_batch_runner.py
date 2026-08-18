@@ -116,6 +116,54 @@ def test_poll_until_terminal_returns_immediately_when_already_done() -> None:
     assert sleeps == []
 
 
+def test_poll_until_terminal_waits_before_first_check_when_requested() -> None:
+    """Right after a fresh submission, OpenRouter's batch API isn't reliably
+    queryable yet (observed: an immediate GET 404s on a batch that was just
+    successfully created) — a positive initial_check_delay_seconds skips
+    that guaranteed-to-fail immediate check by waiting first.
+    """
+    config = BatchConfig(initial_poll_interval_seconds=1, max_poll_interval_seconds=10)
+    sleeps: list[float] = []
+    calls: list[str] = []
+
+    def get_batch(batch_id):
+        calls.append(batch_id)
+        return {"status": "completed"}
+
+    result = poll_until_terminal(
+        "batch-1",
+        config,
+        get_batch=get_batch,
+        is_pending=lambda data: data["status"] != "completed",
+        sleep=sleeps.append,
+        initial_check_delay_seconds=15,
+    )
+
+    assert result == {"status": "completed"}
+    assert sleeps == [15]  # waited once before the (only, successful) check
+    assert calls == ["batch-1"]
+
+
+def test_poll_until_terminal_skips_wait_when_initial_check_delay_is_zero() -> None:
+    """0 (the default, used when resuming a possibly-already-finished batch)
+    must behave exactly like omitting the argument — check immediately.
+    """
+    config = BatchConfig(initial_poll_interval_seconds=1, max_poll_interval_seconds=10)
+    sleeps: list[float] = []
+
+    result = poll_until_terminal(
+        "batch-1",
+        config,
+        get_batch=lambda batch_id: {"status": "completed"},
+        is_pending=lambda data: data["status"] != "completed",
+        sleep=sleeps.append,
+        initial_check_delay_seconds=0,
+    )
+
+    assert result == {"status": "completed"}
+    assert sleeps == []
+
+
 def test_poll_until_terminal_backs_off_then_completes() -> None:
     config = BatchConfig(initial_poll_interval_seconds=1, max_poll_interval_seconds=10)
     statuses = iter(["in_progress", "in_progress", "completed"])
@@ -207,6 +255,39 @@ def test_poll_until_terminal_clamps_initial_interval_to_max() -> None:
 
     assert result == {"status": "completed"}
     assert sleeps == [10]
+
+
+def test_poll_until_terminal_clamps_initial_check_delay_to_deadline() -> None:
+    """A large initial_check_delay_seconds must not overshoot an already-
+    (near-)expired deadline — clamped to 0 here, then the check still
+    happens (matching the no-delay case's "always check at least once").
+    """
+    import datetime as dt
+
+    config = BatchConfig(
+        initial_poll_interval_seconds=1, max_poll_interval_seconds=10, max_wait_hours=1
+    )
+    started_at = dt.datetime.now(dt.UTC) - dt.timedelta(hours=2)
+    sleeps: list[float] = []
+    calls: list[str] = []
+
+    def get_batch(batch_id):
+        calls.append(batch_id)
+        return {"status": "in_progress"}
+
+    result = poll_until_terminal(
+        "batch-1",
+        config,
+        get_batch=get_batch,
+        is_pending=lambda data: True,
+        sleep=sleeps.append,
+        started_at=started_at,
+        initial_check_delay_seconds=120,
+    )
+
+    assert result is None
+    assert sleeps == [0.0]
+    assert calls == ["batch-1"]
 
 
 def test_poll_until_terminal_returns_none_on_timeout() -> None:
