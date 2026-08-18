@@ -4,7 +4,13 @@ from datetime import date
 from pathlib import Path
 
 from meal_orchestrator.config import AppConfig, UserConfig
-from meal_orchestrator.config.models import BatchConfig, DeliveryConfig, LlmConfig, RuntimeConfig
+from meal_orchestrator.config.models import (
+    ArtifactConfig,
+    BatchConfig,
+    DeliveryConfig,
+    LlmConfig,
+    RuntimeConfig,
+)
 from meal_orchestrator.domain import (
     CanonicalDay,
     CanonicalMeal,
@@ -26,6 +32,7 @@ def app_config(
     fallback_models: list[str] | None = None,
     max_concurrent_users: int = 5,
     batch: BatchConfig | None = None,
+    artifacts: ArtifactConfig | None = None,
 ) -> AppConfig:
     return AppConfig(
         runtime=RuntimeConfig(
@@ -45,6 +52,7 @@ def app_config(
             email_from="Meal Orchestrator <meals@example.com>",
             operational_discord_webhook_env="DISCORD_OPS_WEBHOOK_URL",
         ),
+        artifacts=artifacts,
     )
 
 

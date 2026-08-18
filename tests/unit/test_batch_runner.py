@@ -181,10 +181,12 @@ def test_poll_until_terminal_backs_off_then_completes() -> None:
     assert sleeps == [1, 2]
 
 
-def test_poll_until_terminal_logs_every_successful_check(caplog) -> None:
-    """Over a wait that can span hours, a per-check log line (not just the
-    eventual completion/fallback one) is the only visibility into progress —
-    each successful check, pending or terminal, must be logged.
+def test_poll_until_terminal_does_not_log_successful_checks(caplog) -> None:
+    """poll_until_terminal stays generic and quiet on success — a completed
+    batch's `data` can be arbitrarily large (e.g. full per-row LLM output),
+    so logging it here (rather than leaving that to a caller that knows the
+    response shape and what belongs in a log line vs. an artifact) would
+    risk dumping huge payloads to stdout on every check.
     """
     import logging
 
@@ -201,10 +203,7 @@ def test_poll_until_terminal_logs_every_successful_check(caplog) -> None:
         )
 
     assert result == {"status": "completed"}
-    check_logs = [r for r in caplog.records if "batch status check" in r.message]
-    assert len(check_logs) == 2
-    assert check_logs[0].pending is True
-    assert check_logs[1].pending is False
+    assert caplog.records == []
 
 
 def test_poll_until_terminal_survives_a_transient_error_and_keeps_polling() -> None:

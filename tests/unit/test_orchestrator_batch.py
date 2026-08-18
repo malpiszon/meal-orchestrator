@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import date
 
@@ -189,6 +190,159 @@ def test_batch_mode_submits_polls_and_delivers(tmp_path, monkeypatch) -> None:
     assert len(email_client.messages) == 2
     assert not (tmp_path / "batch_state" / "pending_batch.json").exists()
     assert not (tmp_path / "batch_state" / "run.lock").exists()
+
+
+def test_batch_mode_saves_raw_batch_result_as_artifact_not_just_a_log_line(
+    tmp_path, monkeypatch
+) -> None:
+    """The raw OpenRouter batch response (aggregate cost/usage, request
+    counts, every row's full LLM output) must be durably saved — logging it
+    on every poll would dump an arbitrarily large payload to stdout, so it's
+    only ever written to a dedicated artifact file, once per run.
+    """
+    from meal_orchestrator.config.models import ArtifactConfig
+
+    users = [_user(tmp_path, "alan")]
+    submitted_rows = []
+
+    def fake_submit_batch(rows, **_kwargs):
+        submitted_rows.extend(rows)
+        return "batch-1"
+
+    def fake_get_batch(batch_id, **_kwargs):
+        return {
+            "status": "completed",
+            "usage": {"prompt_tokens": 10, "completion_tokens": 20, "cost": 0.001234},
+            "results": [
+                {
+                    "custom_id": row.custom_id,
+                    "response": {
+                        "status_code": 200,
+                        "body": {
+                            "model": row.model,
+                            "choices": [
+                                {
+                                    "message": {
+                                        "content": week_assessment(
+                                            row.payload.menu
+                                        ).model_dump_json()
+                                    }
+                                }
+                            ],
+                            "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+                        },
+                    },
+                    "error": None,
+                }
+                for row in submitted_rows
+            ],
+        }
+
+    monkeypatch.setattr("meal_orchestrator.batch_coordinator.submit_batch", fake_submit_batch)
+    monkeypatch.setattr("meal_orchestrator.batch_coordinator.get_batch", fake_get_batch)
+
+    class UnusedLlmClient:
+        def generate(self, request, **_kwargs):
+            raise AssertionError("synchronous LLM client must not be used when batch succeeds")
+
+    orchestrator = RunOrchestrator(
+        app_config=app_config(
+            batch=BatchConfig(
+                enabled=True,
+                state_dir=tmp_path / "batch_state",
+                initial_check_delay_seconds=0,
+                initial_poll_interval_seconds=0,
+            ),
+            artifacts=ArtifactConfig(
+                path=tmp_path / "artifacts", retention_days=14, max_runs_per_user=10
+            ),
+        ),
+        users=users,
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=UnusedLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=FakeDiscordClient(),
+        capability_check=_no_capability_check,
+    )
+
+    results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert results[0].status == WorkflowStatus.COMPLETED
+    batch_files = list((tmp_path / "artifacts" / "batches").iterdir())
+    assert len(batch_files) == 1  # one file per run
+    saved = json.loads(batch_files[0].read_text())
+    assert saved["usage"]["cost"] == 0.001234
+    assert saved["results"][0]["custom_id"].endswith(":alan")
+
+
+def test_batch_mode_status_check_log_is_small_not_the_full_response(
+    tmp_path, monkeypatch, caplog
+) -> None:
+    """The per-check status log must stay a small, fixed-size line — the
+    full response (potentially every row's complete LLM output) belongs
+    only in the batch-result artifact, not in every poll's log record.
+    """
+    import logging
+
+    users = [_user(tmp_path, "alan")]
+    submitted_rows = []
+    huge_content = week_assessment(canonical_menu()).model_dump_json()
+
+    def fake_submit_batch(rows, **_kwargs):
+        submitted_rows.extend(rows)
+        return "batch-1"
+
+    def fake_get_batch(batch_id, **_kwargs):
+        return {
+            "status": "completed",
+            "usage": {"prompt_tokens": 10, "completion_tokens": 20, "cost": 0.001234},
+            "request_counts": {"total": 1, "completed": 1, "failed": 0},
+            "results": [
+                {
+                    "custom_id": row.custom_id,
+                    "response": {
+                        "status_code": 200,
+                        "body": {
+                            "model": row.model,
+                            "choices": [{"message": {"content": huge_content}}],
+                            "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+                        },
+                    },
+                    "error": None,
+                }
+                for row in submitted_rows
+            ],
+        }
+
+    monkeypatch.setattr("meal_orchestrator.batch_coordinator.submit_batch", fake_submit_batch)
+    monkeypatch.setattr("meal_orchestrator.batch_coordinator.get_batch", fake_get_batch)
+
+    class UnusedLlmClient:
+        def generate(self, request, **_kwargs):
+            raise AssertionError("synchronous LLM client must not be used when batch succeeds")
+
+    orchestrator = RunOrchestrator(
+        app_config=_batch_app_config(tmp_path),
+        users=users,
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=UnusedLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=FakeDiscordClient(),
+        capability_check=_no_capability_check,
+    )
+
+    with caplog.at_level(logging.INFO):
+        results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert results[0].status == WorkflowStatus.COMPLETED
+    check_logs = [r for r in caplog.records if "batch status check" in r.message]
+    assert len(check_logs) == 1
+    assert check_logs[0].status == "completed"
+    assert check_logs[0].request_counts == {"total": 1, "completed": 1, "failed": 0}
+    assert not hasattr(check_logs[0], "batch_data")
+    assert huge_content not in check_logs[0].getMessage()
 
 
 def test_batch_mode_retries_row_failures_synchronously_with_fallback_models(

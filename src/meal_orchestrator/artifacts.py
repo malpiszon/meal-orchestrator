@@ -12,6 +12,8 @@ from meal_orchestrator.domain import CanonicalMenu, LlmRequest, LlmResult
 
 logger = logging.getLogger(__name__)
 
+_BATCH_RESULTS_DIR_NAME = "batches"
+
 
 class RunArtifacts:
     """No-op artifact writer — used when artifacts are disabled."""
@@ -117,6 +119,31 @@ class ArtifactStore:
             )
             return RunArtifacts()
 
+    def save_batch_result(self, run_id: str, data: dict[str, Any]) -> None:
+        """Persist the raw OpenRouter batch response (status, request_counts,
+        aggregate usage/cost, per-row results) once per run — this is the
+        only place that data is durably captured; logging it would mean
+        dumping an arbitrarily large payload (every row's full LLM output)
+        to stdout on every run.
+
+        Not currently covered by `cleanup()`'s retention — these are one
+        small file per run, not per-user, so today's per-user-directory
+        retention logic doesn't apply to them (see `_BATCH_RESULTS_DIR_NAME`
+        being skipped in `cleanup()`).
+        """
+        if not self._config:
+            return
+        path = self._config.path / _BATCH_RESULTS_DIR_NAME / f"{run_id}.json"
+        try:
+            _write_json(path, data)
+        except OSError:
+            logger.warning(
+                "artifact store: failed to save batch result %s",
+                path,
+                exc_info=True,
+                extra={"run_id": run_id, "step": "artifacts"},
+            )
+
     def cleanup(self) -> None:
         if not self._config:
             return
@@ -125,7 +152,7 @@ class ArtifactStore:
             return
         cutoff = datetime.now(UTC) - timedelta(days=self._config.retention_days)
         for user_dir in base.iterdir():
-            if not user_dir.is_dir():
+            if not user_dir.is_dir() or user_dir.name == _BATCH_RESULTS_DIR_NAME:
                 continue
             _cleanup_user_dir(user_dir, cutoff, self._config.max_runs_per_user)
 

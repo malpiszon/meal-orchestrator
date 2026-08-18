@@ -138,6 +138,7 @@ class RunOrchestrator:
                     notify_ops=notify_ops,
                     discord_client=discord_client,
                     api_key=self._llm_api_key(clients),
+                    artifact_store=clients.artifact_store,
                 )
             )
         else:
@@ -352,6 +353,7 @@ class RunOrchestrator:
                     notify_ops=notify_ops,
                     discord_client=discord_client,
                     api_key=self._llm_api_key(clients),
+                    artifact_store=clients.artifact_store,
                 )
             )
         finally:

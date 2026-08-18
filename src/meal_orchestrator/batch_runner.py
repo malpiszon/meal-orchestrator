@@ -197,10 +197,14 @@ def poll_until_terminal(
     are still bounded by `max_wait_hours`, which lets the caller's existing
     timeout-fallback path take over.
 
-    Every successful check is also logged (including the raw response) —
-    over a wait that can span hours, that's the only visibility into
-    progress (e.g. OpenRouter's `request_counts`) between "submitted" and
-    the eventual completion/fallback log line.
+    This function stays deliberately quiet about what a successful check
+    actually returned — `data`'s shape (and how big it is, e.g. a completed
+    batch's full row-by-row LLM output) is entirely up to `get_batch`, so
+    logging it here would either need OpenRouter-specific knowledge this
+    generic poll loop shouldn't have, or dump arbitrarily large payloads to
+    stdout. Callers that want per-check visibility should log from their own
+    `get_batch` wrapper, where the response shape (and what's safe/useful to
+    put in a log line versus an artifact file) is actually known.
     """
     deadline = (started_at or datetime.now(UTC)).timestamp() + config.max_wait_hours * 3600
     # Clamped defensively in case initial > max (loader.py validates this too, but
@@ -219,14 +223,7 @@ def poll_until_terminal(
                 exc_info=True,
             )
         else:
-            pending = is_pending(data)
-            logger.info(
-                "batch status check: batch_id=%s pending=%s",
-                batch_id,
-                pending,
-                extra={"batch_id": batch_id, "pending": pending, "batch_data": data},
-            )
-            if not pending:
+            if not is_pending(data):
                 return data
         if time.time() >= deadline:
             return None

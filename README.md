@@ -66,7 +66,10 @@ notification is sent instead of treating it as an error.
 - Per-run debug artifacts (raw provider response, canonical menu, LLM
   request/response, per-attempt LLM trail including rejected attempts, run
   metadata including LLM diagnostics and the failed step) with
-  retention-based cleanup.
+  retention-based cleanup. When batch mode is used, the raw OpenRouter batch
+  response (aggregate cost/usage, every row's output) is saved once per run
+  under `artifacts/batches/` rather than logged — not currently covered by
+  the retention cleanup above.
 - Structured JSON logging to stdout.
 
 ## Project structure

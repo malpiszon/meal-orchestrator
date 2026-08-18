@@ -145,3 +145,35 @@ def test_cleanup_respects_max_runs_per_user(tmp_path: Path) -> None:
 def test_cleanup_noop_when_path_missing(tmp_path: Path) -> None:
     store = ArtifactStore(_config(tmp_path))
     store.cleanup()
+
+
+def test_save_batch_result_writes_one_file_per_run(tmp_path: Path) -> None:
+    store = ArtifactStore(_config(tmp_path))
+
+    store.save_batch_result("run-1", {"id": "batch-1", "status": "completed"})
+
+    path = tmp_path / "artifacts" / "batches" / "run-1.json"
+    assert json.loads(path.read_text()) == {"id": "batch-1", "status": "completed"}
+
+
+def test_save_batch_result_noop_when_no_config(tmp_path: Path) -> None:
+    store = ArtifactStore(None)
+    store.save_batch_result("run-1", {"id": "batch-1", "status": "completed"})
+    assert not (tmp_path / "artifacts").exists()
+
+
+def test_cleanup_skips_batches_directory(tmp_path: Path) -> None:
+    """The batches/ directory holds one file per run, not per-user run
+    directories — cleanup's per-user retention logic must not touch it
+    (there's no per-user directory to walk there).
+    """
+    store = ArtifactStore(_config(tmp_path, retention_days=7))
+    store.save_batch_result("old-run", {"id": "batch-1", "status": "completed"})
+
+    batch_file = tmp_path / "artifacts" / "batches" / "old-run.json"
+    old_time = (datetime.now(UTC) - timedelta(days=8)).timestamp()
+    os.utime(batch_file, (old_time, old_time))
+
+    store.cleanup()
+
+    assert batch_file.exists()

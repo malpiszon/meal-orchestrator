@@ -5,7 +5,9 @@ import logging
 import os
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Any
 
+from meal_orchestrator.artifacts import ArtifactStore
 from meal_orchestrator.batch_runner import (
     PendingBatchState,
     PendingBatchUser,
@@ -83,6 +85,7 @@ class BatchCoordinator:
         notify_ops: NotifyOps,
         discord_client: DiscordClient,
         api_key: str | None,
+        artifact_store: ArtifactStore,
     ) -> dict[str, WorkflowResult]:
         """Submit every pending user's request as one OpenRouter batch, then
         block (with exponential-backoff polling) until it completes or times
@@ -132,6 +135,7 @@ class BatchCoordinator:
                 discord_client=discord_client,
                 api_key=api_key,
                 started_at=submitted_at,
+                artifact_store=artifact_store,
                 initial_check_delay_seconds=self.app_config.llm.batch.initial_check_delay_seconds,
             )
         finally:
@@ -146,6 +150,7 @@ class BatchCoordinator:
         notify_ops: NotifyOps,
         discord_client: DiscordClient,
         api_key: str | None,
+        artifact_store: ArtifactStore,
     ) -> dict[str, WorkflowResult]:
         """Continue polling/delivering a batch submitted by a prior, crashed/
         restarted invocation. Caller (`RunOrchestrator`) is responsible for
@@ -162,6 +167,7 @@ class BatchCoordinator:
             discord_client=discord_client,
             api_key=api_key,
             started_at=datetime.fromisoformat(state.submitted_at),
+            artifact_store=artifact_store,
         )
 
     def _build_rows(
@@ -205,6 +211,7 @@ class BatchCoordinator:
         discord_client: DiscordClient,
         api_key: str | None,
         started_at: datetime,
+        artifact_store: ArtifactStore,
         initial_check_delay_seconds: float = 0.0,
     ) -> dict[str, WorkflowResult]:
         """`started_at` must be the batch's original submission time (not "now"),
@@ -213,15 +220,39 @@ class BatchCoordinator:
         silently reset the deadline to a full new max_wait_hours window instead
         of continuing to count down from when the batch was actually submitted.
         """
+
+        def _get_batch_and_log(bid: str) -> dict[str, Any]:
+            # A completed batch's `data` can be huge (every row's full LLM
+            # output) — log a small, fixed-size progress line here instead of
+            # the raw response; the raw response itself is saved as an
+            # artifact below once polling ends, not logged to stdout.
+            data = get_batch(bid, api_key=api_key)
+            logger.info(
+                "batch status check: batch_id=%s status=%s request_counts=%s",
+                bid,
+                data.get("status"),
+                data.get("request_counts"),
+                extra={
+                    "run_id": run_id,
+                    "batch_id": bid,
+                    "status": data.get("status"),
+                    "request_counts": data.get("request_counts"),
+                    "step": "batch_check",
+                },
+            )
+            return data
+
         batch_config = self.app_config.llm.batch
         data = poll_until_terminal(
             batch_id,
             batch_config,
-            get_batch=lambda bid: get_batch(bid, api_key=api_key),
+            get_batch=_get_batch_and_log,
             is_pending=lambda d: batch_status(d) in PENDING_STATUSES,
             started_at=started_at,
             initial_check_delay_seconds=initial_check_delay_seconds,
         )
+        if data is not None:
+            artifact_store.save_batch_result(run_id, data)
 
         # State is kept alive through delivery (not cleared right after polling
         # ends) so a crash during delivery can still resume — get_batch is a
@@ -231,15 +262,13 @@ class BatchCoordinator:
         if data is None or batch_status(data) != BatchStatus.COMPLETED:
             logger.warning(
                 "openrouter batch did not complete usably; falling back to synchronous "
-                "processing",
+                "processing%s",
+                "" if data is None else " (see the saved batch artifact for full detail, "
+                "e.g. an error/reason field OpenRouter may have included)",
                 extra={
                     "run_id": run_id,
                     "batch_id": batch_id,
                     "status": batch_status(data).value if data is not None else "timed_out",
-                    # Whatever OpenRouter returned alongside a non-completed status (e.g. an
-                    # error/reason field) — the exact shape isn't documented, so surface the
-                    # raw batch data rather than guessing at field names and dropping detail.
-                    "batch_data": data,
                     "step": "batch_fallback",
                 },
             )
