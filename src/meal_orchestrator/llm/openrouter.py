@@ -137,18 +137,21 @@ _RESPONSE_FORMAT: dict[str, Any] = {
 
 
 def build_request_headers(api_key: str) -> dict[str, str]:
-    """Headers common to every OpenRouter request: auth plus app attribution.
+    """Headers common to every OpenRouter request: auth, app attribution, and
+    the experimental-metadata opt-in that populates `openrouter_metadata` on
+    responses (surfaced via `_response_metadata` into failure diagnostics for
+    both the synchronous and batch clients).
 
     Shared by the synchronous client and the batch client (`openrouter_batch.py`)
-    so both request paths authenticate and are attributed identically. Callers
-    add any endpoint-specific headers on top (e.g. the sync client's
-    experimental-metadata opt-in).
+    so both request paths authenticate, are attributed, and get the same
+    diagnostic data identically.
     """
     return {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
         "HTTP-Referer": _HTTP_REFERER,
         "X-OpenRouter-Title": APP_NAME,
+        "X-OpenRouter-Experimental-Metadata": "enabled",
     }
 
 
@@ -205,10 +208,7 @@ class OpenRouterClient:
         *,
         on_attempt: Callable[[int, str | None, Any, dict[str, Any]], None] | None = None,
     ) -> LlmResult:
-        headers = {
-            **build_request_headers(self._api_key),
-            "X-OpenRouter-Experimental-Metadata": "enabled",
-        }
+        headers = build_request_headers(self._api_key)
         attempt = 0
         feedback: str | None = None
 
