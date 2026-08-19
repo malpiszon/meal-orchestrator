@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import date, timedelta
 
 from meal_orchestrator.domain import (
@@ -175,6 +176,107 @@ def test_produces_well_formed_html_document() -> None:
     assert rendered.startswith("<!doctype html>")
     assert "<html" in rendered
     assert "</html>" in rendered
+
+
+def test_greeting_reports_average_and_high_score_count() -> None:
+    menu = _menu_with_variants("A", "B", "C")
+    assessment = _assessment(menu, [9, 9, 3])
+
+    rendered = render_html(assessment, menu, "test-run-id")
+
+    assert "Hi Alan! This week's top picks average 9.0/10, with 1 dish at 9+." in rendered
+
+
+def test_greeting_pluralises_multiple_high_scores() -> None:
+    menu = CanonicalMenu(
+        provider="example_provider",
+        week_start=date(2026, 6, 1),
+        week_end=date(2026, 6, 2),
+        user_id="example",
+        days=[
+            CanonicalDay(
+                date=date(2026, 6, 1),
+                meals=[
+                    CanonicalMeal(
+                        type="breakfast", variants=[MealVariant(name="A", composition="x")]
+                    )
+                ],
+            ),
+            CanonicalDay(
+                date=date(2026, 6, 2),
+                meals=[
+                    CanonicalMeal(
+                        type="breakfast", variants=[MealVariant(name="B", composition="x")]
+                    )
+                ],
+            ),
+        ],
+    )
+    assessment = WeekAssessment(
+        days=[
+            DayAssessment(
+                date=date(2026, 6, 1),
+                meals=[
+                    MealAssessment(
+                        meal_type="breakfast",
+                        variants=[
+                            VariantAssessment(
+                                variant_index=0,
+                                name="A",
+                                score=9,
+                                justifications=[Justification(icon="💪", text="Reason.")],
+                            )
+                        ],
+                    )
+                ],
+            ),
+            DayAssessment(
+                date=date(2026, 6, 2),
+                meals=[
+                    MealAssessment(
+                        meal_type="breakfast",
+                        variants=[
+                            VariantAssessment(
+                                variant_index=0,
+                                name="B",
+                                score=10,
+                                justifications=[Justification(icon="💪", text="Reason.")],
+                            )
+                        ],
+                    )
+                ],
+            ),
+        ]
+    )
+
+    rendered = render_html(assessment, menu, "test-run-id")
+
+    assert "with 2 dishes at 9+." in rendered
+
+
+def test_greeting_omits_high_score_clause_when_none_qualify() -> None:
+    menu = _menu_with_variants("A", "B")
+    assessment = _assessment(menu, [6, 7])
+
+    rendered = render_html(assessment, menu, "test-run-id")
+    greeting = re.search(r'<div class="greeting">.*?</div>', rendered).group()
+
+    assert greeting == (
+        '<div class="greeting">&#128075; Hi Alan! '
+        "This week's top picks average 7.0/10.</div>"
+    )
+    assert "9+" not in greeting
+    assert "dish" not in greeting
+
+
+def test_does_not_render_static_sign_off() -> None:
+    menu = _menu_with_variants("Only")
+    assessment = _assessment(menu, [8])
+
+    rendered = render_html(assessment, menu, "test-run-id")
+
+    assert "Enjoy your week" not in rendered
+    assert "sign-off" not in rendered
 
 
 def test_full_week_stays_under_gmail_clip_threshold() -> None:
