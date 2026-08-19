@@ -23,6 +23,7 @@ from meal_orchestrator.retries import RetryError, is_transient_http_error, with_
 logger = logging.getLogger(__name__)
 
 _API_URL = "https://openrouter.ai/api/v1/chat/completions"
+_HTTP_REFERER = "https://github.com/malpiszon/meal-orchestrator"
 _BASE_DELAY = 1.0
 _BACKOFF_FACTOR = 2.0
 
@@ -135,6 +136,25 @@ _RESPONSE_FORMAT: dict[str, Any] = {
 }
 
 
+def build_request_headers(api_key: str) -> dict[str, str]:
+    """Headers common to every OpenRouter request: auth, app attribution, and
+    the experimental-metadata opt-in that populates `openrouter_metadata` on
+    responses (surfaced via `_response_metadata` into failure diagnostics for
+    both the synchronous and batch clients).
+
+    Shared by the synchronous client and the batch client (`openrouter_batch.py`)
+    so both request paths authenticate, are attributed, and get the same
+    diagnostic data identically.
+    """
+    return {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": _HTTP_REFERER,
+        "X-OpenRouter-Title": APP_NAME,
+        "X-OpenRouter-Experimental-Metadata": "enabled",
+    }
+
+
 def build_request_body(
     model: str, payload: PromptPayload, feedback: str | None = None
 ) -> dict[str, Any]:
@@ -188,13 +208,7 @@ class OpenRouterClient:
         *,
         on_attempt: Callable[[int, str | None, Any, dict[str, Any]], None] | None = None,
     ) -> LlmResult:
-        headers = {
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/malpiszon/meal-orchestrator",
-            "X-OpenRouter-Title": APP_NAME,
-            "X-OpenRouter-Experimental-Metadata": "enabled",
-        }
+        headers = build_request_headers(self._api_key)
         attempt = 0
         feedback: str | None = None
 
