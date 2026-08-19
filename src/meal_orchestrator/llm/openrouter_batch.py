@@ -9,7 +9,7 @@ from typing import Any
 
 from meal_orchestrator.domain import LlmResult, PromptPayload
 from meal_orchestrator.http import get_json, post_json
-from meal_orchestrator.llm.openrouter import (
+from meal_orchestrator.llm.openrouter_common import (
     OpenRouterResponseError,
     build_request_body,
     build_request_headers,
