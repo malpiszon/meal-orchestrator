@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import date, timedelta
 
 from meal_orchestrator.domain import (
@@ -258,10 +259,14 @@ def test_greeting_omits_high_score_clause_when_none_qualify() -> None:
     assessment = _assessment(menu, [6, 7])
 
     rendered = render_html(assessment, menu, "test-run-id")
+    greeting = re.search(r'<div class="greeting">.*?</div>', rendered).group()
 
-    assert "This week's top picks average 7.0/10." in rendered
-    assert "9+" not in rendered
-    assert "dish" not in rendered
+    assert greeting == (
+        '<div class="greeting">&#128075; Hi Alan! '
+        "This week's top picks average 7.0/10.</div>"
+    )
+    assert "9+" not in greeting
+    assert "dish" not in greeting
 
 
 def test_does_not_render_static_sign_off() -> None:
