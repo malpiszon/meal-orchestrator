@@ -9,7 +9,7 @@ from typing import Any
 
 from meal_orchestrator.domain import LlmRequest, LlmResult
 from meal_orchestrator.http import post_json
-from meal_orchestrator.llm.openrouter_shared import (
+from meal_orchestrator.llm.openrouter_common import (
     EmptyLlmResponseError,
     IncompleteAssessmentError,
     LlmFailureDetails,
