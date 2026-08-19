@@ -183,7 +183,7 @@ def test_greeting_reports_average_and_high_score_count() -> None:
 
     rendered = render_html(assessment, menu, "test-run-id")
 
-    assert "Hi Alan! This week's top meals average 9.0/10, with 1 dish at 9+." in rendered
+    assert "Hi Alan! This week's top picks average 9.0/10, with 1 dish at 9+." in rendered
 
 
 def test_greeting_pluralises_multiple_high_scores() -> None:
@@ -259,7 +259,7 @@ def test_greeting_omits_high_score_clause_when_none_qualify() -> None:
 
     rendered = render_html(assessment, menu, "test-run-id")
 
-    assert "This week's top meals average 7.0/10." in rendered
+    assert "This week's top picks average 7.0/10." in rendered
     assert "9+" not in rendered
     assert "dish" not in rendered
 

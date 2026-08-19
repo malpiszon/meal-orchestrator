@@ -90,7 +90,7 @@ Run ID: {escape(run_id)}</div>
 def _render_greeting(user_id: str, top_scores: list[int]) -> str:
     average = sum(top_scores) / len(top_scores)
     hits = sum(1 for score in top_scores if score >= 9)
-    summary = f"This week's top meals average {average:.1f}/10"
+    summary = f"This week's top picks average {average:.1f}/10"
     if hits:
         dish_word = "dish" if hits == 1 else "dishes"
         summary += f", with {hits} {dish_word} at 9+"
