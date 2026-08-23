@@ -77,6 +77,30 @@ def build_run_metadata(
     return metadata
 
 
+def _build_batch_summary_message(
+    webhook_env: str, run_id: str, results: dict[str, WorkflowResult]
+) -> DiscordMessage:
+    # execute_from_llm_result/execute_from_menu (the only work _deliver
+    # dispatches) never return MENU_UNAVAILABLE — the menu is already
+    # fetched by the time either runs — so only these two statuses are
+    # possible here.
+    completed = sorted(uid for uid, r in results.items() if r.status == WorkflowStatus.COMPLETED)
+    failed = sorted(uid for uid, r in results.items() if r.status == WorkflowStatus.FAILED)
+    color = COLOR_ERROR if failed else COLOR_SUCCESS
+    description = (
+        f"Run {run_id}: {len(completed)} completed, {len(failed)} failed "
+        f"(of {len(results)} batch-delivered)."
+    )
+    if failed:
+        description += f" Failed: {', '.join(failed)} (already alerted individually)."
+    return DiscordMessage(
+        webhook_env=webhook_env,
+        title="Batch run summary",
+        description=description,
+        color=color,
+    )
+
+
 class BatchCoordinator:
     """Owns the OpenRouter batch subsystem: durable state, the cross-process
     run lock, submission, resumption after a crash, polling with a
@@ -449,13 +473,10 @@ class BatchCoordinator:
                 )
 
         fallback_set = set(fallback_user_ids)
-        batch_results: dict[str, WorkflowResult] = {}
 
         def _dispatch_notify(user_id: str, result: WorkflowResult) -> None:
             if user_id in fallback_set or result.status == WorkflowStatus.FAILED:
                 notify_ops(user_id, result)
-            if user_id not in fallback_set:
-                batch_results[user_id] = result
 
         results_by_user_id = run_pool(
             work_items,
@@ -465,6 +486,9 @@ class BatchCoordinator:
             worker_label="batch delivery worker",
         )
 
+        batch_results = {
+            uid: r for uid, r in results_by_user_id.items() if uid not in fallback_set
+        }
         if batch_results:
             self._notify_batch_summary(discord_client, run_id, batch_results)
 
@@ -536,29 +560,9 @@ class BatchCoordinator:
         webhook_env = ops_webhook_env(self.app_config)
         if webhook_env is None:
             return
-        # execute_from_llm_result/execute_from_menu (the only work _deliver
-        # dispatches) never return MENU_UNAVAILABLE — the menu is already
-        # fetched by the time either runs — so only these two statuses are
-        # possible here.
-        completed = sorted(
-            uid for uid, r in results.items() if r.status == WorkflowStatus.COMPLETED
-        )
-        failed = sorted(uid for uid, r in results.items() if r.status == WorkflowStatus.FAILED)
-        color = COLOR_ERROR if failed else COLOR_SUCCESS
-        description = (
-            f"Run {run_id}: {len(completed)} completed, {len(failed)} failed "
-            f"(of {len(results)} batch-delivered)."
-        )
-        if failed:
-            description += f" Failed: {', '.join(failed)} (already alerted individually)."
         notify_safely(
             discord_client,
-            DiscordMessage(
-                webhook_env=webhook_env,
-                title="Batch run summary",
-                description=description,
-                color=color,
-            ),
+            _build_batch_summary_message(webhook_env, run_id, results),
             run_id=run_id,
             step="batch_summary",
         )
