@@ -32,6 +32,16 @@ def notify_safely(
         logger.warning("operational discord notification failed", exc_info=True, extra=extra)
 
 
+def ops_webhook_env(app_config: AppConfig) -> str | None:
+    """The operational Discord webhook's env var name if it's configured and
+    actually set, else None — the one place that answers "can an ops-level
+    notification be sent right now", shared by every ops notifier (per-user,
+    batch summary, batch fallback) so the check can't drift between them.
+    """
+    webhook_env = app_config.delivery.operational_discord_webhook_env
+    return webhook_env if webhook_env and os.environ.get(webhook_env) else None
+
+
 def build_ops_notifier(
     app_config: AppConfig,
     discord_client: DiscordClient,
@@ -44,29 +54,31 @@ def build_ops_notifier(
     summarizing that user's workflow outcome — a no-op if dry-run or no
     operational webhook is configured/set.
     """
-    ops_webhook = app_config.delivery.operational_discord_webhook_env
+    configured_webhook_env = app_config.delivery.operational_discord_webhook_env
 
     def _notify(user_id: str, result: WorkflowResult) -> None:
-        if dry_run or not ops_webhook:
+        if dry_run:
             return
-        if os.environ.get(ops_webhook):
-            notify_safely(
-                discord_client,
-                _build_message(ops_webhook, user_id, run_id, result, model),
-                run_id=run_id,
-                step="ops_notify",
-                user_id=user_id,
-            )
-        else:
-            logger.info(
-                "operational discord notification skipped: env var not set",
-                extra={
-                    "run_id": run_id,
-                    "user_id": user_id,
-                    "step": "ops_notify",
-                    "webhook_env": ops_webhook,
-                },
-            )
+        webhook_env = ops_webhook_env(app_config)
+        if webhook_env is None:
+            if configured_webhook_env:
+                logger.info(
+                    "operational discord notification skipped: env var not set",
+                    extra={
+                        "run_id": run_id,
+                        "user_id": user_id,
+                        "step": "ops_notify",
+                        "webhook_env": configured_webhook_env,
+                    },
+                )
+            return
+        notify_safely(
+            discord_client,
+            _build_message(webhook_env, user_id, run_id, result, model),
+            run_id=run_id,
+            step="ops_notify",
+            user_id=user_id,
+        )
 
     return _notify
 

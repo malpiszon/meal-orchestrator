@@ -420,6 +420,10 @@ def test_batch_mode_retries_row_failures_synchronously_with_fallback_models(
     assert "2/2" in summary_msg.description
     assert "alan" in summary_msg.description
     assert "bob" in summary_msg.description
+    # Both rows fell back to synchronous retry, so there's no batch-delivered
+    # cohort left to summarize — each user already got a real-time per-user
+    # notification (like plain sync mode), and that's the only one they get.
+    assert not any(m.title == "Batch run summary" for m in discord.messages)
 
 
 def test_batch_mode_single_row_failure_still_sends_aggregate_alert(tmp_path, monkeypatch) -> None:
@@ -497,6 +501,12 @@ def test_batch_mode_single_row_failure_still_sends_aggregate_alert(tmp_path, mon
     )
     assert "1/2" in summary_msg.description
     assert "bob" in summary_msg.description
+    # alan's row was actually delivered from the batch, so it's the only one
+    # counted in the batch summary — bob fell back to synchronous retry and
+    # already got a real-time per-user notification instead (asserted above).
+    batch_summary_msg = next(m for m in discord.messages if m.title == "Batch run summary")
+    assert "1 completed" in batch_summary_msg.description
+    assert "bob" not in batch_summary_msg.description
 
 
 def test_batch_mode_no_aggregate_alert_when_every_row_succeeds(tmp_path, monkeypatch) -> None:
@@ -561,6 +571,91 @@ def test_batch_mode_no_aggregate_alert_when_every_row_succeeds(tmp_path, monkeyp
     assert not any(
         "batch rows required synchronous fallback" in m.description for m in discord.messages
     )
+    summary_msg = next(m for m in discord.messages if m.title == "Batch run summary")
+    assert "1 completed" in summary_msg.description
+    assert "0 failed" in summary_msg.description
+
+
+def test_batch_mode_pages_immediately_on_failure_but_summarizes_successes(
+    tmp_path, monkeypatch
+) -> None:
+    """Both rows are actually delivered from the batch (no missing/errored
+    rows, so nothing falls back) — bob's delivery fails at the email step.
+    bob's failure must still page immediately per-user (unchanged urgency),
+    while alan's success is folded into the one summary message instead of
+    getting its own near-simultaneous ping.
+    """
+    users = [_user(tmp_path, "alan"), _user(tmp_path, "bob")]
+    monkeypatch.setenv("DISCORD_OPS_WEBHOOK_URL", "https://example.com/ops")
+    submitted_ids: list[str] = []
+
+    def capturing_submit_batch(rows, **_kwargs):
+        submitted_ids.extend(row.custom_id for row in rows)
+        return "batch-1"
+
+    def fake_get_batch(batch_id, **_kwargs):
+        return {
+            "status": "completed",
+            "results": [
+                {
+                    "custom_id": custom_id,
+                    "response": {
+                        "status_code": 200,
+                        "body": {
+                            "model": "test-model",
+                            "choices": [
+                                {
+                                    "message": {
+                                        "content": week_assessment(
+                                            canonical_menu()
+                                        ).model_dump_json()
+                                    }
+                                }
+                            ],
+                            "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+                        },
+                    },
+                    "error": None,
+                }
+                for custom_id in submitted_ids
+            ],
+        }
+
+    monkeypatch.setattr("meal_orchestrator.batch_coordinator.submit_batch", capturing_submit_batch)
+    monkeypatch.setattr("meal_orchestrator.batch_coordinator.get_batch", fake_get_batch)
+
+    class UnusedLlmClient:
+        def generate(self, request, **_kwargs):
+            raise AssertionError("synchronous LLM client must not be used when batch succeeds")
+
+    class SelectiveFailEmailClient:
+        def send(self, message, idempotency_key: str) -> None:
+            if message.to.startswith("bob"):
+                raise RuntimeError("smtp down")
+
+    discord = FakeDiscordClient()
+    orchestrator = RunOrchestrator(
+        app_config=_batch_app_config(tmp_path),
+        users=users,
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=UnusedLlmClient(),
+        email_client=SelectiveFailEmailClient(),
+        discord_client=discord,
+        capability_check=_no_capability_check,
+    )
+
+    results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert {r.status for r in results} == {WorkflowStatus.COMPLETED, WorkflowStatus.FAILED}
+
+    failed_msg = next(m for m in discord.messages if m.title == "Workflow failed")
+    assert "bob" in failed_msg.description
+
+    summary_msg = next(m for m in discord.messages if m.title == "Batch run summary")
+    assert "1 completed" in summary_msg.description
+    assert "1 failed" in summary_msg.description
+    assert "bob" in summary_msg.description
 
 
 def test_batch_mode_falls_back_to_sync_when_batch_times_out(tmp_path, monkeypatch) -> None:
