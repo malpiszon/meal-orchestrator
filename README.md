@@ -34,9 +34,11 @@ is deliberate, so a growing number of users never sends concurrent requests
 to the menu provider. Once a user's menu is fetched, the remaining steps
 (2-5) run in parallel across users, bounded by `runtime.max_concurrent_users`
 (default 5). The run also sends an operational Discord notification per user
-summarizing success/failure. If a user's menu isn't published yet for the
-target week, that user's LLM/email/delivery steps are skipped and a status
-notification is sent instead of treating it as an error.
+summarizing success/failure (batch mode, see Known limitations, instead
+summarizes successes into one message and only pages per-user on failure).
+If a user's menu isn't published yet for the target week, that user's
+LLM/email/delivery steps are skipped and a status notification is sent
+instead of treating it as an error.
 
 ## Features
 
@@ -274,7 +276,12 @@ auto-generated notes.
   must allow that long an execution. On timeout or failure it falls back to
   synchronous per-user calls (with an ops Discord alert); a batch row that
   individually fails or is missing gets that same synchronous retry +
-  fallback_models resilience, with one aggregate alert if any row needed it.
+  fallback_models resilience (and the same real-time per-user notification
+  plain sync mode gets), with one aggregate alert if any row needed it. Rows
+  actually delivered from the batch only page immediately per-user on
+  failure; successes are folded into one "Batch run summary" notification
+  sent once delivery finishes, since the batch resolves every row together
+  rather than at genuinely different times.
   `llm.batch.state_dir` (required when enabled) holds the durable resume
   state and cross-process lock — point it at a persistent mount, the same
   one `artifacts.path` uses, not the container's ephemeral working

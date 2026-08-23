@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import functools
 import logging
-import os
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -21,8 +20,8 @@ from meal_orchestrator.batch_runner import (
 )
 from meal_orchestrator.config import AppConfig
 from meal_orchestrator.delivery import DiscordClient
-from meal_orchestrator.delivery.discord import COLOR_WARNING
-from meal_orchestrator.domain import DiscordMessage, LlmResult, WorkflowResult
+from meal_orchestrator.delivery.discord import COLOR_ERROR, COLOR_SUCCESS, COLOR_WARNING
+from meal_orchestrator.domain import DiscordMessage, LlmResult, WorkflowResult, WorkflowStatus
 from meal_orchestrator.llm import (
     PENDING_STATUSES,
     BatchRequestRow,
@@ -33,7 +32,7 @@ from meal_orchestrator.llm import (
     parse_batch_results,
     submit_batch,
 )
-from meal_orchestrator.ops_notifications import notify_safely
+from meal_orchestrator.ops_notifications import notify_safely, ops_webhook_env
 from meal_orchestrator.worker_pool import NotifyOps, run_pool
 from meal_orchestrator.workflow import PendingUser, process_pending_synchronously
 
@@ -76,6 +75,30 @@ def build_run_metadata(
     if fallback_reason is not None:
         metadata["fallback_reason"] = fallback_reason
     return metadata
+
+
+def _build_batch_summary_message(
+    webhook_env: str, run_id: str, results: dict[str, WorkflowResult]
+) -> DiscordMessage:
+    # execute_from_llm_result/execute_from_menu (the only work _deliver
+    # dispatches) never return MENU_UNAVAILABLE — the menu is already
+    # fetched by the time either runs — so only these two statuses are
+    # possible here.
+    completed = sorted(uid for uid, r in results.items() if r.status == WorkflowStatus.COMPLETED)
+    failed = sorted(uid for uid, r in results.items() if r.status == WorkflowStatus.FAILED)
+    color = COLOR_ERROR if failed else COLOR_SUCCESS
+    description = (
+        f"Run {run_id}: {len(completed)} completed, {len(failed)} failed "
+        f"(of {len(results)} batch-delivered)."
+    )
+    if failed:
+        description += f" Failed: {', '.join(failed)} (already alerted individually)."
+    return DiscordMessage(
+        webhook_env=webhook_env,
+        title="Batch run summary",
+        description=description,
+        color=color,
+    )
 
 
 class BatchCoordinator:
@@ -403,6 +426,14 @@ class BatchCoordinator:
         synchronously (full retry + fallback_models + artifacts trail via
         execute_from_menu) rather than marking it permanently FAILED — a
         batch row failure gets the same resilience a sync-mode call would.
+
+        Notification is split by row origin: a row that fell back to
+        synchronous retry is, at that point, indistinguishable from plain
+        sync-mode work and gets the same real-time per-user notification for
+        every status. A row actually delivered from the batch only pages
+        immediately on FAILED (still urgent); COMPLETED rows are folded into
+        one summary sent after delivery finishes, since the batch resolved
+        them all together rather than at genuinely different times.
         """
         if not pending:
             return {}
@@ -441,13 +472,25 @@ class BatchCoordinator:
                     pending_user.outcome.log_context,
                 )
 
+        fallback_set = set(fallback_user_ids)
+
+        def _dispatch_notify(user_id: str, result: WorkflowResult) -> None:
+            if user_id in fallback_set or result.status == WorkflowStatus.FAILED:
+                notify_ops(user_id, result)
+
         results_by_user_id = run_pool(
             work_items,
             max_concurrent_users,
             run_id=run_id,
-            notify_ops=notify_ops,
+            notify_ops=_dispatch_notify,
             worker_label="batch delivery worker",
         )
+
+        batch_results = {
+            uid: r for uid, r in results_by_user_id.items() if uid not in fallback_set
+        }
+        if batch_results:
+            self._notify_batch_summary(discord_client, run_id, batch_results)
 
         if fallback_user_ids:
             # A handful of individual row failures is normal and already visible
@@ -504,9 +547,29 @@ class BatchCoordinator:
             ),
         )
 
+    def _notify_batch_summary(
+        self, discord_client: DiscordClient, run_id: str, results: dict[str, WorkflowResult]
+    ) -> None:
+        """One message covering every row actually delivered from the batch
+        (excludes rows that fell back to synchronous retry — those already
+        got their own real-time notification, see `_deliver`) — replaces N
+        near-simultaneous per-user messages with one, since the batch
+        resolved all of them together rather than at genuinely different
+        times.
+        """
+        webhook_env = ops_webhook_env(self.app_config)
+        if webhook_env is None:
+            return
+        notify_safely(
+            discord_client,
+            _build_batch_summary_message(webhook_env, run_id, results),
+            run_id=run_id,
+            step="batch_summary",
+        )
+
     def _notify_fallback(self, discord_client: DiscordClient, run_id: str, reason: str) -> None:
-        webhook_env = self.app_config.delivery.operational_discord_webhook_env
-        if not webhook_env or not os.environ.get(webhook_env):
+        webhook_env = ops_webhook_env(self.app_config)
+        if webhook_env is None:
             return
         notify_safely(
             discord_client,
