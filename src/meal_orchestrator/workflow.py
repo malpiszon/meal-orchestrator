@@ -251,11 +251,16 @@ class UserWorkflowExecutor:
             logger.info("user workflow completed", extra={**log_context, "step": "complete"})
             state.status = WorkflowStatus.COMPLETED
             retry_count = llm_result.attempt - 1
+            summary = state.llm_attempts_summary
             return WorkflowResult(
                 user_id=user.id,
                 status=WorkflowStatus.COMPLETED,
                 retry_count=retry_count,
                 model=llm_result.model,
+                cost=summary.total_cost if summary is not None else None,
+                prompt_tokens=summary.total_prompt_tokens if summary is not None else None,
+                completion_tokens=summary.total_completion_tokens if summary is not None else None,
+                duration_seconds=(datetime.now(UTC) - state.started_at).total_seconds(),
             )
         except Exception as exc:
             return self._generic_failure_result(user, state, log_context, exc)
@@ -303,11 +308,17 @@ class UserWorkflowExecutor:
 
             logger.info("user workflow completed", extra={**log_context, "step": "complete"})
             state.status = WorkflowStatus.COMPLETED
+            token_usage = llm_result.token_usage or {}
             return WorkflowResult(
                 user_id=user.id,
                 status=WorkflowStatus.COMPLETED,
                 retry_count=0,
                 model=llm_result.model,
+                # No per-row cost: OpenRouter only reports cost once per whole
+                # batch (see the docstring above), not per row.
+                prompt_tokens=token_usage.get("prompt_tokens"),
+                completion_tokens=token_usage.get("completion_tokens"),
+                duration_seconds=(datetime.now(UTC) - state.started_at).total_seconds(),
             )
         except Exception as exc:
             return self._generic_failure_result(user, state, log_context, exc)
@@ -326,12 +337,32 @@ class UserWorkflowExecutor:
             extra={**log_context, "step": "failed", "error": state.error},
         )
         retry_count = state.llm_failure.attempt - 1 if state.llm_failure is not None else None
+        summary = state.llm_attempts_summary
+        # On the batch-delivery path (execute_from_llm_result), llm_attempts_summary is
+        # never set (see its docstring) but state.token_usage already carries the real
+        # counts from the batch response — fall back to that so a later-step failure
+        # (email/Discord) doesn't report "tokens: unknown" for a row that was billed.
+        token_usage = state.token_usage or {}
+        prompt_tokens = (
+            summary.total_prompt_tokens
+            if summary is not None
+            else token_usage.get("prompt_tokens")
+        )
+        completion_tokens = (
+            summary.total_completion_tokens
+            if summary is not None
+            else token_usage.get("completion_tokens")
+        )
         return WorkflowResult(
             user_id=user.id,
             status=WorkflowStatus.FAILED,
             detail=state.error,
             failed_step=state.failed_step,
             retry_count=retry_count,
+            cost=summary.total_cost if summary is not None else None,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            duration_seconds=(datetime.now(UTC) - state.started_at).total_seconds(),
         )
 
     def _fetch_menu(

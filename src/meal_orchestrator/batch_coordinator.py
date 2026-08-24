@@ -32,7 +32,13 @@ from meal_orchestrator.llm import (
     parse_batch_results,
     submit_batch,
 )
-from meal_orchestrator.ops_notifications import notify_safely, ops_webhook_env
+from meal_orchestrator.ops_notifications import (
+    format_cost,
+    format_duration,
+    format_tokens,
+    notify_safely,
+    ops_webhook_env,
+)
 from meal_orchestrator.worker_pool import NotifyOps, run_pool
 from meal_orchestrator.workflow import PendingUser, process_pending_synchronously
 
@@ -77,8 +83,24 @@ def build_run_metadata(
     return metadata
 
 
+def _sum_optional(base: float | int | None, extra: list[float | int | None]) -> float | None:
+    """Sum `base` (an OpenRouter-reported aggregate, may be absent) with any
+    `extra` values (per-row figures for rows OpenRouter's aggregate doesn't
+    cover, e.g. synchronous-fallback rows) — None only if nothing is known.
+    """
+    values = [v for v in [base, *extra] if v is not None]
+    return sum(values) if values else None
+
+
 def _build_batch_summary_message(
-    webhook_env: str, run_id: str, results: dict[str, WorkflowResult]
+    webhook_env: str,
+    run_id: str,
+    results: dict[str, WorkflowResult],
+    *,
+    total_cost: float | None,
+    total_prompt_tokens: int | None,
+    total_completion_tokens: int | None,
+    duration_seconds: float,
 ) -> DiscordMessage:
     # execute_from_llm_result/execute_from_menu (the only work _deliver
     # dispatches) never return MENU_UNAVAILABLE — the menu is already
@@ -93,6 +115,11 @@ def _build_batch_summary_message(
     )
     if failed:
         description += f" Failed: {', '.join(failed)} (already alerted individually)."
+    description += (
+        f" Total cost: {format_cost(total_cost)}, "
+        f"total tokens: {format_tokens(total_prompt_tokens, total_completion_tokens)}, "
+        f"total time: {format_duration(duration_seconds)}."
+    )
     return DiscordMessage(
         webhook_env=webhook_env,
         title="Batch run summary",
@@ -394,7 +421,15 @@ class BatchCoordinator:
 
         results, errors = parse_batch_results(rows, data)
         delivered = self._deliver(
-            results, errors, pending, max_concurrent_users, run_id, notify_ops, discord_client
+            results,
+            errors,
+            pending,
+            max_concurrent_users,
+            run_id,
+            notify_ops,
+            discord_client,
+            started_at=started_at,
+            aggregate_usage=data.get("usage"),
         )
         self._save_run_metadata(
             artifact_store,
@@ -421,6 +456,9 @@ class BatchCoordinator:
         run_id: str,
         notify_ops: NotifyOps,
         discord_client: DiscordClient,
+        *,
+        started_at: datetime,
+        aggregate_usage: dict[str, Any] | None,
     ) -> dict[str, WorkflowResult]:
         """Deliver every completed row, and retry every failed/missing row
         synchronously (full retry + fallback_models + artifacts trail via
@@ -490,7 +528,29 @@ class BatchCoordinator:
             uid: r for uid, r in results_by_user_id.items() if uid not in fallback_set
         }
         if batch_results:
-            self._notify_batch_summary(discord_client, run_id, batch_results)
+            # Every fallback row's cost/tokens here come from its own synchronous
+            # retry call (execute_from_menu -> a fresh, separately-billed OpenRouter
+            # request) — a wholly different generation from whatever the batch itself
+            # billed for that row (if anything), so it's always additive on top of
+            # `aggregate_usage`, regardless of why the row fell back.
+            fallback_results = [
+                r for uid, r in results_by_user_id.items() if uid in fallback_set
+            ]
+            aggregate = aggregate_usage or {}
+            self._notify_batch_summary(
+                discord_client,
+                run_id,
+                batch_results,
+                total_cost=_sum_optional(aggregate.get("cost"), [r.cost for r in fallback_results]),
+                total_prompt_tokens=_sum_optional(
+                    aggregate.get("prompt_tokens"), [r.prompt_tokens for r in fallback_results]
+                ),
+                total_completion_tokens=_sum_optional(
+                    aggregate.get("completion_tokens"),
+                    [r.completion_tokens for r in fallback_results],
+                ),
+                duration_seconds=(datetime.now(UTC) - started_at).total_seconds(),
+            )
 
         if fallback_user_ids:
             # A handful of individual row failures is normal and already visible
@@ -548,7 +608,15 @@ class BatchCoordinator:
         )
 
     def _notify_batch_summary(
-        self, discord_client: DiscordClient, run_id: str, results: dict[str, WorkflowResult]
+        self,
+        discord_client: DiscordClient,
+        run_id: str,
+        results: dict[str, WorkflowResult],
+        *,
+        total_cost: float | None,
+        total_prompt_tokens: int | None,
+        total_completion_tokens: int | None,
+        duration_seconds: float,
     ) -> None:
         """One message covering every row actually delivered from the batch
         (excludes rows that fell back to synchronous retry — those already
@@ -562,7 +630,15 @@ class BatchCoordinator:
             return
         notify_safely(
             discord_client,
-            _build_batch_summary_message(webhook_env, run_id, results),
+            _build_batch_summary_message(
+                webhook_env,
+                run_id,
+                results,
+                total_cost=total_cost,
+                total_prompt_tokens=total_prompt_tokens,
+                total_completion_tokens=total_completion_tokens,
+                duration_seconds=duration_seconds,
+            ),
             run_id=run_id,
             step="batch_summary",
         )

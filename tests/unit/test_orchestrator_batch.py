@@ -576,6 +576,156 @@ def test_batch_mode_no_aggregate_alert_when_every_row_succeeds(tmp_path, monkeyp
     assert "0 failed" in summary_msg.description
 
 
+def test_batch_summary_includes_aggregate_cost_tokens_and_time(tmp_path, monkeypatch) -> None:
+    users = [_user(tmp_path, "alan")]
+    monkeypatch.setenv("DISCORD_OPS_WEBHOOK_URL", "https://example.com/ops")
+    submitted_ids: list[str] = []
+
+    def capturing_submit_batch(rows, **_kwargs):
+        submitted_ids.extend(row.custom_id for row in rows)
+        return "batch-1"
+
+    def fake_get_batch(batch_id, **_kwargs):
+        return {
+            "status": "completed",
+            "usage": {"prompt_tokens": 10, "completion_tokens": 20, "cost": 0.0012},
+            "results": [
+                {
+                    "custom_id": custom_id,
+                    "response": {
+                        "status_code": 200,
+                        "body": {
+                            "model": "test-model",
+                            "choices": [
+                                {
+                                    "message": {
+                                        "content": week_assessment(
+                                            canonical_menu()
+                                        ).model_dump_json()
+                                    }
+                                }
+                            ],
+                            "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+                        },
+                    },
+                    "error": None,
+                }
+                for custom_id in submitted_ids
+            ],
+        }
+
+    monkeypatch.setattr("meal_orchestrator.batch_coordinator.submit_batch", capturing_submit_batch)
+    monkeypatch.setattr("meal_orchestrator.batch_coordinator.get_batch", fake_get_batch)
+
+    class UnusedLlmClient:
+        def generate(self, request, **_kwargs):
+            raise AssertionError("synchronous LLM client must not be used when batch succeeds")
+
+    discord = FakeDiscordClient()
+    orchestrator = RunOrchestrator(
+        app_config=_batch_app_config(tmp_path),
+        users=users,
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=UnusedLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=discord,
+        capability_check=_no_capability_check,
+    )
+
+    results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert all(r.status == WorkflowStatus.COMPLETED for r in results)
+    summary_msg = next(m for m in discord.messages if m.title == "Batch run summary")
+    assert "Total cost: $0.001200" in summary_msg.description
+    assert "total tokens: 10 in / 20 out" in summary_msg.description
+    assert "total time:" in summary_msg.description
+
+
+def test_batch_summary_cost_combines_aggregate_with_fallback_rows(tmp_path, monkeypatch) -> None:
+    """A row that fell back to synchronous retry isn't part of OpenRouter's
+    batch-level aggregate usage — its real cost must still be added on top,
+    not silently dropped from the batch summary's total.
+    """
+    users = [_user(tmp_path, "alan"), _user(tmp_path, "bob")]
+    monkeypatch.setenv("DISCORD_OPS_WEBHOOK_URL", "https://example.com/ops")
+    submitted_ids: list[str] = []
+
+    def capturing_submit_batch(rows, **_kwargs):
+        submitted_ids.extend(row.custom_id for row in rows)
+        return "batch-1"
+
+    def fake_get_batch(batch_id, **_kwargs):
+        # Only alan's row comes back completed — bob's falls back to sync.
+        completed_ids = [row_id for row_id in submitted_ids if "alan" in row_id]
+        return {
+            "status": "completed",
+            "usage": {"prompt_tokens": 10, "completion_tokens": 20, "cost": 0.0012},
+            "results": [
+                {
+                    "custom_id": row_id,
+                    "response": {
+                        "status_code": 200,
+                        "body": {
+                            "model": "test-model",
+                            "choices": [
+                                {
+                                    "message": {
+                                        "content": week_assessment(
+                                            canonical_menu()
+                                        ).model_dump_json()
+                                    }
+                                }
+                            ],
+                            "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+                        },
+                    },
+                    "error": None,
+                }
+                for row_id in completed_ids
+            ],
+        }
+
+    monkeypatch.setattr("meal_orchestrator.batch_coordinator.submit_batch", capturing_submit_batch)
+    monkeypatch.setattr("meal_orchestrator.batch_coordinator.get_batch", fake_get_batch)
+
+    class UsageTrackingSyncFallbackLlmClient:
+        def generate(self, request, on_attempt=None, **_kwargs):
+            if on_attempt is not None:
+                on_attempt(
+                    1,
+                    None,
+                    {
+                        "model": request.model,
+                        "usage": {"cost": 0.0005, "prompt_tokens": 15, "completion_tokens": 25},
+                    },
+                    {"model": request.model},
+                )
+            return LlmResult(
+                structured=week_assessment(request.payload.menu), model=request.model, attempt=1
+            )
+
+    discord = FakeDiscordClient()
+    orchestrator = RunOrchestrator(
+        app_config=_batch_app_config(tmp_path),
+        users=users,
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=UsageTrackingSyncFallbackLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=discord,
+        capability_check=_no_capability_check,
+    )
+
+    results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert all(r.status == WorkflowStatus.COMPLETED for r in results)
+    summary_msg = next(m for m in discord.messages if m.title == "Batch run summary")
+    # 0.0012 (batch aggregate, covers alan only) + 0.0005 (bob's real sync-fallback cost).
+    assert "Total cost: $0.001700" in summary_msg.description
+    assert "total tokens: 25 in / 45 out" in summary_msg.description
+
+
 def test_batch_mode_pages_immediately_on_failure_but_summarizes_successes(
     tmp_path, monkeypatch
 ) -> None:
@@ -649,8 +799,16 @@ def test_batch_mode_pages_immediately_on_failure_but_summarizes_successes(
 
     assert {r.status for r in results} == {WorkflowStatus.COMPLETED, WorkflowStatus.FAILED}
 
+    failed_result = next(r for r in results if r.status == WorkflowStatus.FAILED)
+    # bob's row was already delivered from the batch (with real token counts) before
+    # failing at the email step — that data must survive into the FAILED result, not
+    # be dropped just because llm_attempts_summary (a sync-only mechanism) is unset.
+    assert failed_result.prompt_tokens == 10
+    assert failed_result.completion_tokens == 20
+
     failed_msg = next(m for m in discord.messages if m.title == "Workflow failed")
     assert "bob" in failed_msg.description
+    assert "tokens: 10 in / 20 out" in failed_msg.description
 
     summary_msg = next(m for m in discord.messages if m.title == "Batch run summary")
     assert "1 completed" in summary_msg.description
