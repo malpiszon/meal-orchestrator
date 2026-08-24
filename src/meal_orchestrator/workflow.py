@@ -5,7 +5,7 @@ import json
 import logging
 import os
 import threading
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import NamedTuple
@@ -85,6 +85,21 @@ class _LlmAttemptsSummary:
         }
 
 
+@dataclass(frozen=True)
+class WorkflowUsage:
+    """cost/prompt_tokens/completion_tokens/duration_seconds for one `WorkflowResult`
+    — the per-user counterpart to `BatchCoordinator.BatchUsageTotals`, so both
+    "usage figures that are always computed and consumed together" cases in this
+    codebase use the same shape (a small typed dataclass) rather than one using a
+    dataclass and the other a bare dict.
+    """
+
+    cost: float | None
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    duration_seconds: float
+
+
 @dataclass
 class _WorkflowState:
     started_at: datetime
@@ -95,6 +110,28 @@ class _WorkflowState:
     failed_step: str = "provider"
     llm_failure: LlmFailureDetails | None = None
     llm_attempts_summary: _LlmAttemptsSummary | None = None
+
+    def usage(self) -> WorkflowUsage:
+        """Shared by every `WorkflowResult` construction site so the derivation
+        logic (including the batch-delivery fallback to `token_usage` when
+        `llm_attempts_summary` is unset) lives in exactly one place.
+        """
+        summary = self.llm_attempts_summary
+        token_usage = self.token_usage or {}
+        return WorkflowUsage(
+            cost=summary.total_cost if summary is not None else None,
+            prompt_tokens=(
+                summary.total_prompt_tokens
+                if summary is not None
+                else token_usage.get("prompt_tokens")
+            ),
+            completion_tokens=(
+                summary.total_completion_tokens
+                if summary is not None
+                else token_usage.get("completion_tokens")
+            ),
+            duration_seconds=(datetime.now(UTC) - self.started_at).total_seconds(),
+        )
 
 
 @dataclass
@@ -256,6 +293,7 @@ class UserWorkflowExecutor:
                 status=WorkflowStatus.COMPLETED,
                 retry_count=retry_count,
                 model=llm_result.model,
+                **asdict(state.usage()),
             )
         except Exception as exc:
             return self._generic_failure_result(user, state, log_context, exc)
@@ -303,11 +341,14 @@ class UserWorkflowExecutor:
 
             logger.info("user workflow completed", extra={**log_context, "step": "complete"})
             state.status = WorkflowStatus.COMPLETED
+            # usage()'s cost comes out None here since llm_attempts_summary is
+            # never set on this path — see the docstring above for why.
             return WorkflowResult(
                 user_id=user.id,
                 status=WorkflowStatus.COMPLETED,
                 retry_count=0,
                 model=llm_result.model,
+                **asdict(state.usage()),
             )
         except Exception as exc:
             return self._generic_failure_result(user, state, log_context, exc)
@@ -332,6 +373,7 @@ class UserWorkflowExecutor:
             detail=state.error,
             failed_step=state.failed_step,
             retry_count=retry_count,
+            **asdict(state.usage()),
         )
 
     def _fetch_menu(

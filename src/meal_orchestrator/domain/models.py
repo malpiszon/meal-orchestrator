@@ -167,3 +167,7 @@ class WorkflowResult:
     failed_step: str | None = None
     retry_count: int | None = None
     model: str | None = None
+    cost: float | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    duration_seconds: float | None = None

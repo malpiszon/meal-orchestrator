@@ -159,6 +159,9 @@ def build_request_body(
         # Skip any endpoint that would silently ignore response_format rather
         # than risk a non-schema-conforming completion from it.
         "provider": {"require_parameters": True},
+        # Opt in to OpenRouter reporting usage.cost on the response — without this
+        # the usage block only carries token counts, not cost.
+        "usage": {"include": True},
     }
 
 

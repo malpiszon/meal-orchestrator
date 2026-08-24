@@ -461,6 +461,19 @@ class TestOpenRouterClientGenerate:
 
         assert captured["body"]["provider"] == {"require_parameters": True}
 
+    def test_sends_usage_include_to_get_cost_in_response(self) -> None:
+        captured = {}
+
+        def side_effect(req, timeout=None):
+            captured["body"] = json.loads(req.data.decode("utf-8"))
+            return _mock_urlopen(_mock_response(_assessment_json()))
+
+        with patch("urllib.request.urlopen", side_effect=side_effect):
+            client = OpenRouterClient(api_key="test-key")
+            client.generate(_make_request())
+
+        assert captured["body"]["usage"] == {"include": True}
+
     def test_sends_strict_json_schema_response_format(self) -> None:
         captured = {}
 

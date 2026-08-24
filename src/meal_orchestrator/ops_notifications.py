@@ -120,6 +120,7 @@ def _build_message(
                 f" Served by fallback model {result.model} (configured primary: {expected_model})."
             )
             color = COLOR_WARNING
+        description += f" {_stats_note(result)}"
         return DiscordMessage(
             webhook_env=webhook_env,
             title="Workflow completed",
@@ -135,15 +136,17 @@ def _build_message(
             color=COLOR_WARNING,
         )
     failed_step = result.failed_step or "unknown"
+    description = (
+        f"Workflow failed for user {user_id} (run {run_id}) at step {failed_step}: "
+        # The underlying error message already states the attempt count
+        # (e.g. "failed after 3 attempt(s)"), so no separate retry note here.
+        f"{result.detail or 'unknown error'}"
+    )
+    description += f" {_stats_note(result)}"
     return DiscordMessage(
         webhook_env=webhook_env,
         title="Workflow failed",
-        description=(
-            f"Workflow failed for user {user_id} (run {run_id}) at step {failed_step}: "
-            # The underlying error message already states the attempt count
-            # (e.g. "failed after 3 attempt(s)"), so no separate retry note here.
-            f"{result.detail or 'unknown error'}"
-        ),
+        description=description,
         color=COLOR_ERROR,
     )
 
@@ -152,3 +155,40 @@ def _run_note(run_id: str, retry_count: int | None) -> str:
     if not retry_count:
         return f"(run {run_id})"
     return f"(run {run_id}, {retry_count} retr{'y' if retry_count == 1 else 'ies'})"
+
+
+def _stats_note(result: WorkflowResult) -> str:
+    """Cost/tokens/time trailer appended to a per-user ops notification."""
+    return (
+        f"Cost: {format_cost(result.cost)}, "
+        f"tokens: {format_tokens(result.prompt_tokens, result.completion_tokens)}, "
+        f"time: {format_duration(result.duration_seconds)}."
+    )
+
+
+_UNKNOWN = "unknown"
+
+
+def format_cost(cost: float | None) -> str:
+    return _UNKNOWN if cost is None else f"${cost:.6f}"
+
+
+def format_tokens(prompt_tokens: int | None, completion_tokens: int | None) -> str:
+    if prompt_tokens is None and completion_tokens is None:
+        return _UNKNOWN
+    prompt = prompt_tokens if prompt_tokens is not None else 0
+    completion = completion_tokens if completion_tokens is not None else 0
+    return f"{prompt:,} in / {completion:,} out"
+
+
+def format_duration(seconds: float | None) -> str:
+    if seconds is None:
+        return _UNKNOWN
+    total = int(seconds)
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes}m"
+    if minutes:
+        return f"{minutes}m {secs}s"
+    return f"{secs}s"
