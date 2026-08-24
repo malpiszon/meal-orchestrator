@@ -84,7 +84,7 @@ def build_run_metadata(
     return metadata
 
 
-def _sum_optional(base: float | int | None, extra: list[float | int | None]) -> float | None:
+def _sum_optional[N: (int, float)](base: N | None, extra: list[N | None]) -> N | None:
     """Sum `base` (an OpenRouter-reported aggregate, may be absent) with any
     `extra` values (per-row figures for rows OpenRouter's aggregate doesn't
     cover, e.g. synchronous-fallback rows) — None only if nothing is known.

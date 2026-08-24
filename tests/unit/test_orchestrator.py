@@ -115,6 +115,43 @@ class TrackingLlmClient:
         )
 
 
+class UsageTrackingLlmClient:
+    """Succeeds, but first fires `on_attempt` with real usage data — so
+    `_LlmAttemptsSummary` accumulates non-trivial cost/tokens, letting tests
+    assert on what a completed (or later-failing) workflow reports for them."""
+
+    def __init__(
+        self, *, cost: float = 0.0025, prompt_tokens: int = 120, completion_tokens: int = 340
+    ) -> None:
+        self._cost = cost
+        self._prompt_tokens = prompt_tokens
+        self._completion_tokens = completion_tokens
+
+    def generate(self, request, on_attempt=None, **_kwargs):
+        if on_attempt is not None:
+            on_attempt(
+                1,
+                None,
+                {
+                    "model": request.model,
+                    "usage": {
+                        "cost": self._cost,
+                        "prompt_tokens": self._prompt_tokens,
+                        "completion_tokens": self._completion_tokens,
+                    },
+                },
+                {"model": request.model},
+            )
+        return LlmResult(
+            structured=week_assessment(request.payload.menu), model=request.model, attempt=1
+        )
+
+
+class FailingEmailClient:
+    def send(self, message, idempotency_key: str) -> None:
+        raise RuntimeError("smtp down")
+
+
 def _no_capability_check(model: str, **_kwargs) -> None:
     pass
 
@@ -272,22 +309,6 @@ def test_operational_notification_flags_fallback_model_on_completion(
 
 
 def test_operational_notification_includes_cost_tokens_and_time(tmp_path, monkeypatch) -> None:
-    class UsageTrackingLlmClient:
-        def generate(self, request, on_attempt=None, **_kwargs):
-            if on_attempt is not None:
-                on_attempt(
-                    1,
-                    None,
-                    {
-                        "model": request.model,
-                        "usage": {"cost": 0.0025, "prompt_tokens": 120, "completion_tokens": 340},
-                    },
-                    {"model": request.model},
-                )
-            return LlmResult(
-                structured=week_assessment(request.payload.menu), model=request.model, attempt=1
-            )
-
     prompt_file = tmp_path / "prompt.md"
     prompt_file.write_text("Choose meals.", encoding="utf-8")
     monkeypatch.setenv("DISCORD_OPS_WEBHOOK_URL", "https://example.com/ops")
@@ -317,6 +338,45 @@ def test_operational_notification_includes_cost_tokens_and_time(tmp_path, monkey
     assert "Cost: $0.002500" in ops_msg.description
     assert "tokens: 120 in / 340 out" in ops_msg.description
     assert "time:" in ops_msg.description
+
+
+def test_operational_notification_reports_real_cost_on_later_step_failure(
+    tmp_path, monkeypatch
+) -> None:
+    """A FAILED result whose LLM call actually succeeded (and so accrued real
+    cost/tokens) before a later step blew up must still report that real
+    figure — not fall back to "unknown" just because the workflow ultimately
+    failed. Distinct from the FAILED case in
+    test_orchestrator_sends_operational_notification_on_failure, where the
+    provider fails before any LLM call happens and cost is genuinely unknown.
+    """
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    monkeypatch.setenv("DISCORD_OPS_WEBHOOK_URL", "https://example.com/ops")
+    monkeypatch.setenv("DISCORD_USER_WEBHOOK_URL", "https://example.com/user")
+    discord = FakeDiscordClient()
+
+    orchestrator = RunOrchestrator(
+        app_config=app_config(),
+        users=[user_config(prompt_file.relative_to(tmp_path))],
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=UsageTrackingLlmClient(cost=0.0031, prompt_tokens=80, completion_tokens=200),
+        email_client=FailingEmailClient(),
+        discord_client=discord,
+        capability_check=_no_capability_check,
+    )
+
+    result = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert result[0].status == WorkflowStatus.FAILED
+    assert result[0].cost == 0.0031
+    assert result[0].prompt_tokens == 80
+    assert result[0].completion_tokens == 200
+    ops_msg = discord.messages[-1]
+    assert ops_msg.webhook_env == "DISCORD_OPS_WEBHOOK_URL"
+    assert "Cost: $0.003100" in ops_msg.description
+    assert "tokens: 80 in / 200 out" in ops_msg.description
 
 
 def test_orchestrator_sends_operational_notification_on_failure(tmp_path, monkeypatch) -> None:
