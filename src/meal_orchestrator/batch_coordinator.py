@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import functools
 import logging
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -92,15 +93,30 @@ def _sum_optional(base: float | int | None, extra: list[float | int | None]) -> 
     return sum(values) if values else None
 
 
+@dataclass(frozen=True)
+class BatchUsageTotals:
+    """Cost/tokens/time for a whole batch run. These four figures always
+    travel together (computed once in `_deliver`, consumed once in
+    `_build_batch_summary_message`) — one value here instead of four
+    separately-ordered parameters threaded through every call in between.
+    """
+
+    total_cost: float | None
+    total_prompt_tokens: int | None
+    total_completion_tokens: int | None
+    duration_seconds: float
+
+    def describe(self) -> str:
+        tokens = format_tokens(self.total_prompt_tokens, self.total_completion_tokens)
+        return (
+            f"Total cost: {format_cost(self.total_cost)}, "
+            f"total tokens: {tokens}, "
+            f"total time: {format_duration(self.duration_seconds)}."
+        )
+
+
 def _build_batch_summary_message(
-    webhook_env: str,
-    run_id: str,
-    results: dict[str, WorkflowResult],
-    *,
-    total_cost: float | None,
-    total_prompt_tokens: int | None,
-    total_completion_tokens: int | None,
-    duration_seconds: float,
+    webhook_env: str, run_id: str, results: dict[str, WorkflowResult], usage: BatchUsageTotals
 ) -> DiscordMessage:
     # execute_from_llm_result/execute_from_menu (the only work _deliver
     # dispatches) never return MENU_UNAVAILABLE — the menu is already
@@ -115,11 +131,7 @@ def _build_batch_summary_message(
     )
     if failed:
         description += f" Failed: {', '.join(failed)} (already alerted individually)."
-    description += (
-        f" Total cost: {format_cost(total_cost)}, "
-        f"total tokens: {format_tokens(total_prompt_tokens, total_completion_tokens)}, "
-        f"total time: {format_duration(duration_seconds)}."
-    )
+    description += f" {usage.describe()}"
     return DiscordMessage(
         webhook_env=webhook_env,
         title="Batch run summary",
@@ -537,10 +549,7 @@ class BatchCoordinator:
                 r for uid, r in results_by_user_id.items() if uid in fallback_set
             ]
             aggregate = aggregate_usage or {}
-            self._notify_batch_summary(
-                discord_client,
-                run_id,
-                batch_results,
+            usage = BatchUsageTotals(
                 total_cost=_sum_optional(aggregate.get("cost"), [r.cost for r in fallback_results]),
                 total_prompt_tokens=_sum_optional(
                     aggregate.get("prompt_tokens"), [r.prompt_tokens for r in fallback_results]
@@ -551,6 +560,7 @@ class BatchCoordinator:
                 ),
                 duration_seconds=(datetime.now(UTC) - started_at).total_seconds(),
             )
+            self._notify_batch_summary(discord_client, run_id, batch_results, usage)
 
         if fallback_user_ids:
             # A handful of individual row failures is normal and already visible
@@ -612,11 +622,7 @@ class BatchCoordinator:
         discord_client: DiscordClient,
         run_id: str,
         results: dict[str, WorkflowResult],
-        *,
-        total_cost: float | None,
-        total_prompt_tokens: int | None,
-        total_completion_tokens: int | None,
-        duration_seconds: float,
+        usage: BatchUsageTotals,
     ) -> None:
         """One message covering every row actually delivered from the batch
         (excludes rows that fell back to synchronous retry — those already
@@ -630,15 +636,7 @@ class BatchCoordinator:
             return
         notify_safely(
             discord_client,
-            _build_batch_summary_message(
-                webhook_env,
-                run_id,
-                results,
-                total_cost=total_cost,
-                total_prompt_tokens=total_prompt_tokens,
-                total_completion_tokens=total_completion_tokens,
-                duration_seconds=duration_seconds,
-            ),
+            _build_batch_summary_message(webhook_env, run_id, results, usage),
             run_id=run_id,
             step="batch_summary",
         )
