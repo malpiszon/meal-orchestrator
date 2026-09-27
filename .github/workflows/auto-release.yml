@@ -29,6 +29,13 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      - name: Verify running on default branch
+        run: |
+          if [ "${{ github.ref }}" != "refs/heads/master" ]; then
+            echo "::error::Auto Release must run against master (got ${{ github.ref }}); re-run with master selected."
+            exit 1
+          fi
+
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
@@ -44,6 +51,7 @@ jobs:
         if: github.event_name == 'schedule'
         id: changes
         run: |
+          set -euo pipefail
           latest="${{ steps.latest.outputs.tag }}"
           if [ "$latest" = "v0.0.0" ]; then
             count=1
@@ -55,14 +63,17 @@ jobs:
       - name: Determine next version
         if: github.event_name != 'schedule' || steps.changes.outputs.count != '0'
         id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_RELEASE_TYPE: ${{ inputs.release_type }}
         run: |
           set -euo pipefail
 
           input_version=""
           release_type="patch"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            input_version="${{ inputs.version }}"
-            release_type="${{ inputs.release_type }}"
+            input_version="$INPUT_VERSION"
+            release_type="$INPUT_RELEASE_TYPE"
           fi
 
           if [ -n "$input_version" ]; then
