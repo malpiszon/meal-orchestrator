@@ -1,0 +1,98 @@
+name: Auto Release
+
+on:
+  schedule:
+    - cron: "0 18 * * 1"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Exact version to release, e.g. 0.5.0 (overrides release_type)"
+        required: false
+        type: string
+      release_type:
+        description: "Version bump (ignored if 'version' is set)"
+        required: false
+        type: choice
+        options:
+          - minor
+          - patch
+        default: minor
+
+permissions:
+  contents: read
+
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PAT }}
+
+      - name: Determine latest release tag
+        id: latest
+        run: |
+          latest="$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)"
+          echo "tag=${latest:-v0.0.0}" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if no changes since last release
+        if: github.event_name == 'schedule'
+        id: changes
+        run: |
+          latest="${{ steps.latest.outputs.tag }}"
+          if [ "$latest" = "v0.0.0" ]; then
+            count=1
+          else
+            count="$(git rev-list "${latest}..HEAD" --count)"
+          fi
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+      - name: Determine next version
+        if: github.event_name != 'schedule' || steps.changes.outputs.count != '0'
+        id: version
+        run: |
+          set -euo pipefail
+
+          input_version=""
+          release_type="patch"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            input_version="${{ inputs.version }}"
+            release_type="${{ inputs.release_type }}"
+          fi
+
+          if [ -n "$input_version" ]; then
+            version="${input_version#v}"
+          else
+            latest="${{ steps.latest.outputs.tag }}"
+            IFS='.' read -r major minor patch <<< "${latest#v}"
+            if [ "$release_type" = "minor" ]; then
+              minor=$((minor + 1))
+              patch=0
+            else
+              patch=$((patch + 1))
+            fi
+            version="${major}.${minor}.${patch}"
+          fi
+
+          echo "$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || {
+            echo "::error::Invalid version '$version', expected X.Y.Z"
+            exit 1
+          }
+          if git rev-parse "v$version" >/dev/null 2>&1; then
+            echo "::error::Tag v$version already exists"
+            exit 1
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push release tag
+        if: steps.version.outputs.value != ''
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${{ steps.version.outputs.value }}" -m "${{ steps.version.outputs.value }}"
+          git push origin "v${{ steps.version.outputs.value }}"
