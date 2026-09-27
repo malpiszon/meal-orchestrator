@@ -39,7 +39,7 @@ from meal_orchestrator.providers import (
     ProviderNormalizationError,
 )
 from meal_orchestrator.rendering.html import render_html
-from meal_orchestrator.rendering.labels import SUBJECT_EMOJI
+from meal_orchestrator.rendering.labels import SUBJECT_EMOJI, format_date_range
 from meal_orchestrator.rendering.plain_text import render_plain_text
 from meal_orchestrator.worker_pool import NotifyOps, run_pool
 
@@ -473,8 +473,8 @@ class UserWorkflowExecutor:
                     to=user.email,
                     from_address=self.app_config.delivery.email_from,
                     subject=(
-                        f"{SUBJECT_EMOJI} Meal plan for {run_context.week_start.isoformat()}"
-                        f" – {run_context.week_end.isoformat()}"
+                        f"{SUBJECT_EMOJI} Meal plan for "
+                        f"{format_date_range(run_context.week_start, run_context.week_end)}"
                     ),
                     body=render_plain_text(llm_result.structured, menu, run_context.run_id),
                     html_body=render_html(llm_result.structured, menu, run_context.run_id),
@@ -509,7 +509,7 @@ class UserWorkflowExecutor:
                     title="Meal plan ready",
                     description=(
                         f"Hey <@{user.discord_user_id}>, your meal plan for "
-                        f"{run_context.week_start.isoformat()}–{run_context.week_end.isoformat()} "
+                        f"{format_date_range(run_context.week_start, run_context.week_end)} "
                         "is ready."
                     ),
                     color=COLOR_SUCCESS,
@@ -535,7 +535,7 @@ class UserWorkflowExecutor:
                     title="Menu not available yet",
                     description=(
                         f"Hey <@{user.discord_user_id}>, the menu for "
-                        f"{run_context.week_start.isoformat()}–{run_context.week_end.isoformat()} "
+                        f"{format_date_range(run_context.week_start, run_context.week_end)} "
                         "is not available yet."
                     ),
                     color=COLOR_WARNING,

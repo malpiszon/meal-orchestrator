@@ -52,3 +52,13 @@ def meal_label(meal_type: str) -> tuple[str, str]:
 def weekday_name(value: date) -> str:
     """Return the Polish weekday name for a date."""
     return _WEEKDAY_NAMES_PL[value.weekday()]
+
+
+def format_date(value: date) -> str:
+    """Return a date in the user-facing DD-MM-YYYY format."""
+    return value.strftime("%d-%m-%Y")
+
+
+def format_date_range(start: date, end: date) -> str:
+    """Return a date range in the user-facing DD-MM-YYYY format, e.g. '14-09-2026 to 18-09-2026'."""
+    return f"{format_date(start)} to {format_date(end)}"
