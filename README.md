@@ -201,7 +201,8 @@ The application version is derived entirely from Git tags via
 `setuptools_scm` — there is no version string to bump in the codebase.
 Pushing a tag matching `vX.Y.Z` triggers the release workflow, which builds
 and publishes the Docker image and creates the GitHub Release with
-auto-generated notes.
+auto-generated notes. Releases can also be tagged automatically or via a
+manual trigger; see `.github/workflows/auto-release.yml`.
 
 ## Adding a new provider
 
