@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
+import urllib.error
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -15,10 +17,18 @@ from meal_orchestrator.llm.openrouter_common import (
     build_request_headers,
     parse_batch_completion,
 )
+from meal_orchestrator.retries import with_retries
 
 logger = logging.getLogger(__name__)
 
 _BATCH_API_URL = "https://openrouter.ai/api/beta/batches"
+
+# Batch submission rate limits are per-minute windows. A 429 is retried after
+# waiting until its `X-RateLimit-Reset`, or — when that's missing, already past
+# or unreasonably far off — after a fixed backoff (30s, then 60s).
+_SUBMIT_MAX_ATTEMPTS = 3
+_SUBMIT_RETRY_BASE_DELAY = 30.0
+_SUBMIT_MAX_RESET_WAIT = 90.0
 
 
 class BatchStatus(StrEnum):
@@ -70,13 +80,45 @@ def submit_batch(
             ],
         }
     ).encode("utf-8")
-    raw = post_json(
-        _BATCH_API_URL, headers=_headers(api_key), body=body, timeout_seconds=timeout_seconds
+    raw = with_retries(
+        lambda: post_json(
+            _BATCH_API_URL, headers=_headers(api_key), body=body, timeout_seconds=timeout_seconds
+        ),
+        max_attempts=_SUBMIT_MAX_ATTEMPTS,
+        retryable=lambda exc: isinstance(exc, urllib.error.HTTPError) and exc.code == 429,
+        delay_seconds=_submit_retry_delay,
+        operation_name="openrouter batch submit",
     )
     data = json.loads(raw.decode("utf-8"))
     batch_id = data["id"]
     logger.info("openrouter batch submitted: batch_id=%s rows=%d", batch_id, len(rows))
     return batch_id
+
+
+def _submit_retry_delay(exc: Exception, attempt: int) -> float:
+    reset_wait = _seconds_until_rate_limit_reset(exc)
+    if reset_wait is not None and 0 < reset_wait <= _SUBMIT_MAX_RESET_WAIT:
+        return reset_wait
+    return _SUBMIT_RETRY_BASE_DELAY * 2 ** (attempt - 1)
+
+
+def _seconds_until_rate_limit_reset(exc: Exception) -> float | None:
+    """Seconds until the 429's `X-RateLimit-Reset` (epoch milliseconds), if it has one.
+
+    OpenRouter reports it as a real response header and, in the error body, under
+    `error.metadata.headers`; either is accepted.
+    """
+    raw = getattr(exc, "headers", None) and exc.headers.get("X-RateLimit-Reset")  # type: ignore[attr-defined]
+    if raw is None:
+        try:
+            body = json.loads(getattr(exc, "response_body", "") or "")
+            raw = body["error"]["metadata"]["headers"]["X-RateLimit-Reset"]
+        except (ValueError, KeyError, TypeError):
+            return None
+    try:
+        return int(raw) / 1000 - time.time()
+    except (TypeError, ValueError):
+        return None
 
 
 def get_batch(

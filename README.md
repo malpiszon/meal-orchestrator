@@ -274,7 +274,7 @@ manual trigger; see `.github/workflows/auto-release.yml`.
   user's LLM request as one batch for a ~50% token-price discount. A run
   blocks internally (backoff-polling) for up to `llm.batch.max_wait_hours`
   instead of returning within minutes, so the scheduler/container running it
-  must allow that long an execution. On submission rejection, timeout or failure it falls back to
+  must allow that long an execution. A rate-limited (429) submission is retried twice first (waiting until `X-RateLimit-Reset` when reported, else a fixed backoff). On submission rejection, timeout or failure it falls back to
   synchronous per-user calls (with an ops Discord alert); a batch row that
   individually fails or is missing gets that same synchronous retry +
   fallback_models resilience (and the same real-time per-user notification
