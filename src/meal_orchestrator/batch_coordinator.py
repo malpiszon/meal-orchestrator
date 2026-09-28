@@ -211,28 +211,41 @@ class BatchCoordinator:
                 "falling back to synchronous processing",
                 extra={"run_id": run_id, "step": "batch_submit"},
             )
-            self._notify_fallback(
-                discord_client, run_id, "batch submission skipped: run lock already held"
-            )
-            fallback_started_at = datetime.now(UTC)
-            results = process_pending_synchronously(
-                pending, max_concurrent_users, run_id, notify_ops
-            )
-            self._save_run_metadata(
-                artifact_store,
+            return self._submit_fallback(
+                pending,
+                "run lock already held",
                 run_id=run_id,
                 week_start=week_start,
                 week_end=week_end,
                 model=model,
-                users=list(pending),
-                mode="sync_fallback",
-                started_at=fallback_started_at,
-                fallback_reason="run lock already held",
+                max_concurrent_users=max_concurrent_users,
+                notify_ops=notify_ops,
+                discord_client=discord_client,
+                artifact_store=artifact_store,
             )
-            return results
         try:
             rows = self._build_rows(pending, run_id)
-            batch_id = submit_batch(rows, api_key=api_key)
+            try:
+                batch_id = submit_batch(rows, api_key=api_key)
+            except Exception as exc:
+                logger.error(
+                    "batch submission failed: %s; falling back to synchronous processing",
+                    exc,
+                    exc_info=True,
+                    extra={"run_id": run_id, "step": "batch_submit"},
+                )
+                return self._submit_fallback(
+                    pending,
+                    f"batch submission failed: {exc}",
+                    run_id=run_id,
+                    week_start=week_start,
+                    week_end=week_end,
+                    model=model,
+                    max_concurrent_users=max_concurrent_users,
+                    notify_ops=notify_ops,
+                    discord_client=discord_client,
+                    artifact_store=artifact_store,
+                )
             submitted_at = datetime.now(UTC)
             save_state(
                 self._state_dir,
@@ -269,6 +282,37 @@ class BatchCoordinator:
             )
         finally:
             self.release_lock()
+
+    def _submit_fallback(
+        self,
+        pending: dict[str, PendingUser],
+        reason: str,
+        *,
+        run_id: str,
+        week_start: date,
+        week_end: date,
+        model: str,
+        max_concurrent_users: int,
+        notify_ops: NotifyOps,
+        discord_client: DiscordClient,
+        artifact_store: ArtifactStore,
+    ) -> dict[str, WorkflowResult]:
+        """Process every pending user synchronously because no batch could be submitted."""
+        self._notify_fallback(discord_client, run_id, reason)
+        started_at = datetime.now(UTC)
+        results = process_pending_synchronously(pending, max_concurrent_users, run_id, notify_ops)
+        self._save_run_metadata(
+            artifact_store,
+            run_id=run_id,
+            week_start=week_start,
+            week_end=week_end,
+            model=model,
+            users=list(pending),
+            mode="sync_fallback",
+            started_at=started_at,
+            fallback_reason=reason,
+        )
+        return results
 
     def resume(
         self,
