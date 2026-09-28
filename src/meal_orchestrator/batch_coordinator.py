@@ -3,7 +3,7 @@ from __future__ import annotations
 import functools
 import logging
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -263,6 +263,9 @@ class BatchCoordinator:
                         for user_id in pending
                     ],
                 ),
+            )
+            self._notify_submitted(
+                discord_client, run_id, batch_id, len(pending), submitted_at, model
             )
             return self._await_and_deliver(
                 batch_id,
@@ -683,6 +686,39 @@ class BatchCoordinator:
             _build_batch_summary_message(webhook_env, run_id, results, usage),
             run_id=run_id,
             step="batch_summary",
+        )
+
+    def _notify_submitted(
+        self,
+        discord_client: DiscordClient,
+        run_id: str,
+        batch_id: str,
+        user_count: int,
+        submitted_at: datetime,
+        model: str,
+    ) -> None:
+        """Signal that a batch is now in flight — it can take up to the
+        polling timeout to resolve, so silence alone can't tell "still
+        running" from "never started".
+        """
+        webhook_env = ops_webhook_env(self.app_config)
+        if webhook_env is None:
+            return
+        deadline = submitted_at + timedelta(hours=self.app_config.llm.batch.max_wait_hours)
+        notify_safely(
+            discord_client,
+            DiscordMessage(
+                webhook_env=webhook_env,
+                title="Batch submitted",
+                description=(
+                    f"Run {run_id}: batch {batch_id} submitted for {user_count} user(s) "
+                    f"with model {model}; polling until "
+                    f"{deadline.strftime('%Y-%m-%d %H:%M')} UTC."
+                ),
+                color=COLOR_WARNING,
+            ),
+            run_id=run_id,
+            step="batch_submitted",
         )
 
     def _notify_fallback(self, discord_client: DiscordClient, run_id: str, reason: str) -> None:
