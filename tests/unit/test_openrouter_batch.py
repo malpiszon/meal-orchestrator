@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import time
 import urllib.error
+from email.message import Message
 from unittest.mock import patch
 
 import pytest
@@ -16,6 +17,7 @@ from meal_orchestrator.llm.openrouter_batch import (
     parse_batch_results,
     submit_batch,
 )
+from meal_orchestrator.retries import RetryError
 from tests.unit.helpers import canonical_menu, week_assessment
 
 
@@ -111,6 +113,33 @@ def test_submit_batch_ignores_unusable_reset(reset_in: float) -> None:
         submit_batch([_row("run-1:alan")], api_key="key")
 
     mock_sleep.assert_called_once_with(30.0)
+
+
+def test_submit_batch_reads_reset_from_body_when_headers_are_empty() -> None:
+    error = _http_error(429, reset_in=45)
+    error.hdrs = Message()  # an empty Message is falsy but not None
+    with (
+        patch("meal_orchestrator.llm.openrouter_batch.post_json") as mock_post,
+        patch("meal_orchestrator.retries.time.sleep") as mock_sleep,
+    ):
+        mock_post.side_effect = [error, json.dumps({"id": "batch-123"}).encode("utf-8")]
+        submit_batch([_row("run-1:alan")], api_key="key")
+
+    (delay,) = mock_sleep.call_args.args
+    assert 40 < delay <= 45
+
+
+def test_submit_batch_gives_up_after_repeated_rate_limits() -> None:
+    with (
+        patch("meal_orchestrator.llm.openrouter_batch.post_json") as mock_post,
+        patch("meal_orchestrator.retries.time.sleep") as mock_sleep,
+    ):
+        mock_post.side_effect = _http_error(429)
+        with pytest.raises(RetryError, match="3 attempt"):
+            submit_batch([_row("run-1:alan")], api_key="key")
+
+    assert mock_post.call_count == 3
+    assert [c.args[0] for c in mock_sleep.call_args_list] == [30.0, 60.0]
 
 
 def test_submit_batch_does_not_retry_other_errors() -> None:

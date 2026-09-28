@@ -108,7 +108,8 @@ def _seconds_until_rate_limit_reset(exc: Exception) -> float | None:
     OpenRouter reports it as a real response header and, in the error body, under
     `error.metadata.headers`; either is accepted.
     """
-    raw = getattr(exc, "headers", None) and exc.headers.get("X-RateLimit-Reset")  # type: ignore[attr-defined]
+    headers = getattr(exc, "headers", None)
+    raw = headers.get("X-RateLimit-Reset") if headers is not None else None
     if raw is None:
         try:
             body = json.loads(getattr(exc, "response_body", "") or "")
