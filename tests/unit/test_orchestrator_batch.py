@@ -1393,3 +1393,44 @@ def test_batch_submission_degrades_to_sync_when_state_dir_unwritable(tmp_path) -
     results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
 
     assert results[0].status == WorkflowStatus.COMPLETED
+
+
+def test_batch_submit_failure_falls_back_to_synchronous_and_notifies_ops(
+    tmp_path, monkeypatch
+) -> None:
+    """A rejected batch submission (e.g. HTTP 400 "model has no :batch endpoint")
+    must not crash the run — users are processed synchronously and ops is alerted.
+    """
+    users = [_user(tmp_path, "example")]
+
+    def failing_submit_batch(rows, **_kwargs):
+        raise RuntimeError("HTTP Error 400: Model 'x' does not have a :batch endpoint.")
+
+    monkeypatch.setattr("meal_orchestrator.batch_coordinator.submit_batch", failing_submit_batch)
+    monkeypatch.setenv("DISCORD_OPS_WEBHOOK_URL", "https://example.com/ops")
+
+    class SyncLlmClient:
+        def generate(self, request, **_kwargs):
+            return LlmResult(
+                structured=week_assessment(request.payload.menu), model=request.model, attempt=1
+            )
+
+    email_client = FakeEmailClient()
+    discord = FakeDiscordClient()
+    orchestrator = RunOrchestrator(
+        app_config=_batch_app_config(tmp_path),
+        users=users,
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=SyncLlmClient(),
+        email_client=email_client,
+        discord_client=discord,
+        capability_check=_no_capability_check,
+    )
+
+    results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert all(r.status == WorkflowStatus.COMPLETED for r in results)
+    assert len(email_client.messages) == 1
+    assert any(":batch endpoint" in m.description for m in discord.messages)
+    assert not (tmp_path / "batch_state" / "run.lock").exists()
