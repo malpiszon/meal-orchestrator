@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 from meal_orchestrator.artifacts import ArtifactStore
 from meal_orchestrator.batch_coordinator import BatchCoordinator, build_run_metadata
 from meal_orchestrator.batch_runner import PendingBatchState
-from meal_orchestrator.config import AppConfig, UserConfig
+from meal_orchestrator.config import AUTO_ROUTER_MODEL, AppConfig, UserConfig
 from meal_orchestrator.delivery import DiscordClient, EmailClient, build_discord_client
 from meal_orchestrator.delivery.email import ResendEmailClient
 from meal_orchestrator.domain import (
@@ -112,6 +112,14 @@ class RunOrchestrator:
 
         discord_client = self.discord_client_override or build_discord_client()
         model = self._resolve_model(options)
+        if batch_enabled and model == AUTO_ROUTER_MODEL:
+            # Config loading rejects this combination; only a --llm-model override gets here.
+            logger.warning(
+                "batch mode skipped: model %s has no :batch endpoint, running synchronously",
+                model,
+                extra={"run_id": run_id, "step": "start"},
+            )
+            batch_enabled = False
 
         capability_failures = self._run_capability_check(
             model, discord_client, run_id, options, selected_users
@@ -216,7 +224,8 @@ class RunOrchestrator:
         else:
             email_client = ResendEmailClient() if os.environ.get("RESEND_API_KEY") else None
         llm_client = self.llm_client_override or OpenRouterClient(
-            max_retries=self.app_config.llm.max_retries
+            max_retries=self.app_config.llm.max_retries,
+            auto_router=self.app_config.llm.auto_router,
         )
         provider_factory = self.provider_factory_override or build_provider_adapter
         artifact_store = ArtifactStore(self.app_config.artifacts)

@@ -7,6 +7,7 @@ import urllib.error
 from collections.abc import Callable
 from typing import Any
 
+from meal_orchestrator.config import AutoRouterConfig
 from meal_orchestrator.domain import LlmRequest, LlmResult
 from meal_orchestrator.http import post_json
 from meal_orchestrator.llm.openrouter_common import (
@@ -47,9 +48,16 @@ _SLOW_CLEARING_BASE_DELAY = 15.0
 
 
 class OpenRouterClient:
-    def __init__(self, *, api_key: str | None = None, max_retries: int = 3) -> None:
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        max_retries: int = 3,
+        auto_router: AutoRouterConfig | None = None,
+    ) -> None:
         self._api_key = api_key if api_key is not None else os.environ["OPENROUTER_API_KEY"]
         self._max_retries = max_retries
+        self._auto_router = auto_router
 
     @property
     def api_key(self) -> str:
@@ -74,9 +82,11 @@ class OpenRouterClient:
         def _call(model: str) -> tuple[dict[str, Any], Any]:
             nonlocal attempt
             attempt += 1
-            body = json.dumps(build_request_body(model, request.payload, feedback)).encode(
-                "utf-8"
-            )
+            body = json.dumps(
+                build_request_body(
+                    model, request.payload, feedback, auto_router=self._auto_router
+                )
+            ).encode("utf-8")
             try:
                 raw = post_json(
                     _API_URL, headers=headers, body=body, timeout_seconds=request.timeout_seconds

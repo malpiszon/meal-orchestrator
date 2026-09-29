@@ -600,3 +600,67 @@ def test_batch_config_rejects_initial_poll_interval_above_max(tmp_path) -> None:
 
     with pytest.raises(ConfigError, match="initial_poll_interval_seconds"):
         load_app_config(path)
+
+
+def test_auto_router_config_defaults_when_absent(tmp_path) -> None:
+    path = tmp_path / "app.yaml"
+    path.write_text(_base_app_yaml(), encoding="utf-8")
+
+    app = load_app_config(path)
+
+    assert app.llm.auto_router.cost_tier is None
+    assert app.llm.auto_router.allowed_models == []
+
+
+def test_auto_router_config_loaded_when_present(tmp_path) -> None:
+    path = tmp_path / "app.yaml"
+    path.write_text(
+        _base_app_yaml(
+            """  auto_router:
+    cost_tier: medium
+    allowed_models:
+      - "openai/*"
+      - "google/gemini-*"
+"""
+        ),
+        encoding="utf-8",
+    )
+
+    app = load_app_config(path)
+
+    assert app.llm.auto_router.cost_tier == "medium"
+    assert app.llm.auto_router.allowed_models == ["openai/*", "google/gemini-*"]
+
+
+def test_auto_router_config_rejects_unknown_cost_tier(tmp_path) -> None:
+    path = tmp_path / "app.yaml"
+    path.write_text(_base_app_yaml("  auto_router:\n    cost_tier: cheap\n"), encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="cost_tier"):
+        load_app_config(path)
+
+
+def test_auto_router_config_rejects_non_list_allowed_models(tmp_path) -> None:
+    path = tmp_path / "app.yaml"
+    path.write_text(
+        _base_app_yaml("  auto_router:\n    allowed_models: openai/*\n"), encoding="utf-8"
+    )
+
+    with pytest.raises(ConfigError, match="allowed_models"):
+        load_app_config(path)
+
+
+def test_batch_config_rejects_auto_router_model(tmp_path) -> None:
+    path = tmp_path / "app.yaml"
+    path.write_text(
+        _base_app_yaml(
+            """  batch:
+    enabled: true
+    state_dir: /data/batch_state
+"""
+        ).replace("model: test", "model: openrouter/auto"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="batch endpoint"):
+        load_app_config(path)

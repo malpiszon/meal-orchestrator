@@ -6,8 +6,11 @@ from typing import Any
 import yaml
 
 from meal_orchestrator.config.models import (
+    AUTO_ROUTER_COST_TIERS,
+    AUTO_ROUTER_MODEL,
     AppConfig,
     ArtifactConfig,
+    AutoRouterConfig,
     BatchConfig,
     DeliveryConfig,
     LlmConfig,
@@ -24,6 +27,12 @@ class ConfigError(ValueError):
 def load_app_config(path: Path) -> AppConfig:
     data = _load_yaml(path)
     llm_model = _required(data, "llm", "model")
+    batch = _parse_batch(data)
+    if batch.enabled and llm_model == AUTO_ROUTER_MODEL:
+        raise ConfigError(
+            f"llm.batch.enabled is incompatible with llm.model {AUTO_ROUTER_MODEL!r}: "
+            "OpenRouter's batch API needs a concrete model with a :batch endpoint"
+        )
     return AppConfig(
         runtime=RuntimeConfig(
             timezone=_required(data, "runtime", "timezone"),
@@ -40,7 +49,8 @@ def load_app_config(path: Path) -> AppConfig:
             fallback_models=_parse_fallback_models(
                 _optional(data, "llm", "fallback_models"), llm_model
             ),
-            batch=_parse_batch(data),
+            batch=batch,
+            auto_router=_parse_auto_router(_optional(data, "llm", "auto_router")),
         ),
         default_provider=_required(data, "providers", "default"),
         delivery=DeliveryConfig(
@@ -61,6 +71,24 @@ def _parse_fallback_models(raw: Any, model: str) -> list[str]:
     if model in raw:
         raise ConfigError(f"llm.fallback_models must not include the primary model: {model}")
     return raw
+
+
+def _parse_auto_router(raw: Any) -> AutoRouterConfig:
+    if raw is None:
+        return AutoRouterConfig()
+    if not isinstance(raw, dict):
+        raise ConfigError("llm.auto_router must be a mapping")
+    cost_tier = raw.get("cost_tier")
+    if cost_tier is not None and cost_tier not in AUTO_ROUTER_COST_TIERS:
+        raise ConfigError(
+            f"llm.auto_router.cost_tier must be one of: {', '.join(AUTO_ROUTER_COST_TIERS)}"
+        )
+    allowed_models = raw.get("allowed_models", [])
+    if not isinstance(allowed_models, list) or not all(
+        isinstance(item, str) for item in allowed_models
+    ):
+        raise ConfigError("llm.auto_router.allowed_models must be a list of strings")
+    return AutoRouterConfig(cost_tier=cost_tier, allowed_models=allowed_models)
 
 
 def _parse_max_concurrent_users(raw: Any) -> int:

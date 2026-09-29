@@ -13,6 +13,14 @@ llm:
   max_retries: 3
   fallback_models:
     - "google/gemini-3.1-flash-lite"
+  # model/dry_run_model may be "openrouter/auto" (OpenRouter's Auto Router,
+  # sync mode only — it has no batch endpoint). Optional router settings,
+  # sent only with that model:
+  # auto_router:
+  #   cost_tier: "low"   # low | medium | high | xhigh | max
+  #   allowed_models:
+  #     - "openai/*"
+  #     - "google/gemini-*"
   # OpenRouter batch mode (beta, ~50% cheaper, blocks a run for up to
   # max_wait_hours). Disabled by default — see README's Known limitations.
   batch:

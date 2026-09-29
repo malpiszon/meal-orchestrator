@@ -60,7 +60,10 @@ instead of treating it as an error.
   it doesn't fail over for the embedded-error-in-a-200-response shape rate
   limits actually use, so the client drives the switch itself.) Fallback is
   omitted during `--dry-run` runs so a rate-limited dry run can't escalate
-  past `dry_run_model`'s cost tier.
+  past `dry_run_model`'s cost tier. The model can also be `openrouter/auto`
+  (OpenRouter's Auto Router), tuned via the optional `llm.auto_router`
+  block (see `config/app.example.yaml`); it has no batch endpoint, so it
+  can't be combined with batch mode.
 - Email delivery via Resend, Discord notifications via webhooks (per-user and
   operational), both optional and independently configurable.
 - `--dry-run` mode that runs the full pipeline (including the LLM call)

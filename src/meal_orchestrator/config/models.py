@@ -22,6 +22,20 @@ class BatchConfig:
     max_wait_hours: int = 26
 
 
+# OpenRouter's Auto Router slug. It picks a concrete model per request, so it
+# has no `:batch` endpoint and can't be used with batch mode.
+AUTO_ROUTER_MODEL = "openrouter/auto"
+AUTO_ROUTER_COST_TIERS = ("low", "medium", "high", "xhigh", "max")
+
+
+@dataclass(frozen=True)
+class AutoRouterConfig:
+    """Optional `auto-router` plugin settings, sent only for AUTO_ROUTER_MODEL."""
+
+    cost_tier: str | None = None
+    allowed_models: list[str] = field(default_factory=list)
+
+
 @dataclass(frozen=True)
 class LlmConfig:
     provider: str
@@ -31,6 +45,7 @@ class LlmConfig:
     dry_run_model: str | None = None
     fallback_models: list[str] = field(default_factory=list)
     batch: BatchConfig = field(default_factory=BatchConfig)
+    auto_router: AutoRouterConfig = field(default_factory=AutoRouterConfig)
 
 
 @dataclass(frozen=True)
