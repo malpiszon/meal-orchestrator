@@ -28,10 +28,12 @@ def load_app_config(path: Path) -> AppConfig:
     data = _load_yaml(path)
     llm_model = _required(data, "llm", "model")
     batch = _parse_batch(data)
-    if batch.enabled and llm_model == AUTO_ROUTER_MODEL:
+    fallback_models = _parse_fallback_models(_optional(data, "llm", "fallback_models"), llm_model)
+    if batch.enabled and llm_model == AUTO_ROUTER_MODEL and not fallback_models:
         raise ConfigError(
-            f"llm.batch.enabled is incompatible with llm.model {AUTO_ROUTER_MODEL!r}: "
-            "OpenRouter's batch API needs a concrete model with a :batch endpoint"
+            f"llm.batch.enabled with llm.model {AUTO_ROUTER_MODEL!r} requires "
+            "llm.fallback_models: OpenRouter's batch API needs a concrete model with a "
+            ":batch endpoint, so the batch is submitted with the fallback models"
         )
     return AppConfig(
         runtime=RuntimeConfig(
@@ -46,9 +48,7 @@ def load_app_config(path: Path) -> AppConfig:
             timeout_seconds=int(_required(data, "llm", "timeout_seconds")),
             max_retries=int(_required(data, "llm", "max_retries")),
             dry_run_model=_optional(data, "llm", "dry_run_model"),
-            fallback_models=_parse_fallback_models(
-                _optional(data, "llm", "fallback_models"), llm_model
-            ),
+            fallback_models=fallback_models,
             batch=batch,
             auto_router=_parse_auto_router(_optional(data, "llm", "auto_router")),
         ),

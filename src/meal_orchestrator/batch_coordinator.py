@@ -20,7 +20,7 @@ from meal_orchestrator.batch_runner import (
     release_lock,
     save_state,
 )
-from meal_orchestrator.config import AppConfig
+from meal_orchestrator.config import AUTO_ROUTER_MODEL, AppConfig
 from meal_orchestrator.delivery import DiscordClient
 from meal_orchestrator.delivery.discord import COLOR_ERROR, COLOR_SUCCESS, COLOR_WARNING
 from meal_orchestrator.domain import DiscordMessage, LlmResult, WorkflowResult, WorkflowStatus
@@ -298,12 +298,15 @@ class BatchCoordinator:
     ) -> tuple[list[BatchRequestRow], str, str]:
         """Submit the batch with `model`, then each of `fallback_models` (not in a
         dry run, which keeps to its cheap model) while OpenRouter rejects the
-        model itself (400/404, e.g. no `:batch` endpoint). Returns the rows,
+        model itself (400/404, e.g. no `:batch` endpoint); `openrouter/auto` is
+        skipped without submitting. Returns the rows,
         batch id and the model that was accepted; any other error, or every
         model rejected, raises so the caller falls back to synchronous processing.
         """
         dry_run = next(iter(pending.values())).run_context.dry_run
         candidates = [model] if dry_run else [model, *self.app_config.llm.fallback_models]
+        # The Auto Router has no :batch endpoint, so it's skipped rather than submitted.
+        candidates = [candidate for candidate in candidates if candidate != AUTO_ROUTER_MODEL]
         rejections = []
         for candidate in candidates:
             rows = self._build_rows(pending, run_id, candidate)

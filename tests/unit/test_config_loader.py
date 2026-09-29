@@ -662,5 +662,25 @@ def test_batch_config_rejects_auto_router_model(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    with pytest.raises(ConfigError, match="batch endpoint"):
+    with pytest.raises(ConfigError, match="requires llm.fallback_models"):
         load_app_config(path)
+
+
+def test_batch_config_allows_auto_router_model_with_fallback_models(tmp_path) -> None:
+    path = tmp_path / "app.yaml"
+    path.write_text(
+        _base_app_yaml(
+            """  fallback_models:
+    - openai/gpt-5-mini
+  batch:
+    enabled: true
+    state_dir: /data/batch_state
+"""
+        ).replace("model: test", "model: openrouter/auto"),
+        encoding="utf-8",
+    )
+
+    app = load_app_config(path)
+
+    assert app.llm.model == "openrouter/auto"
+    assert app.llm.batch.enabled
