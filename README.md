@@ -62,8 +62,9 @@ instead of treating it as an error.
   omitted during `--dry-run` runs so a rate-limited dry run can't escalate
   past `dry_run_model`'s cost tier. The model can also be `openrouter/auto`
   (OpenRouter's Auto Router), tuned via the optional `llm.auto_router`
-  block (see `config/app.example.yaml`); it has no batch endpoint, so it
-  can't be combined with batch mode.
+  block (see `config/app.example.yaml`); it has no batch endpoint, so in
+  batch mode the batch is submitted with `llm.fallback_models` (then
+  required) while synchronous calls still start from the Auto Router.
 - Email delivery via Resend, Discord notifications via webhooks (per-user and
   operational), both optional and independently configurable.
 - `--dry-run` mode that runs the full pipeline (including the LLM call)

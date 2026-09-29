@@ -112,7 +112,7 @@ class RunOrchestrator:
 
         discord_client = self.discord_client_override or build_discord_client()
         model = self._resolve_model(options)
-        if batch_enabled and model == AUTO_ROUTER_MODEL:
+        if batch_enabled and model == AUTO_ROUTER_MODEL and not self.app_config.llm.fallback_models:
             # Config loading rejects this combination; only a --llm-model override gets here.
             logger.warning(
                 "batch mode skipped: model %s has no :batch endpoint, running synchronously",
