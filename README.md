@@ -285,7 +285,8 @@ manual trigger; see `.github/workflows/auto-release.yml`.
   actually delivered from the batch only page immediately per-user on
   failure; successes are folded into one "Batch run summary" notification
   sent once delivery finishes, since the batch resolves every row together
-  rather than at genuinely different times.
+  rather than at genuinely different times. A "Batch submitted" ops
+  notification (with the polling deadline) is sent when the batch is accepted.
   `llm.batch.state_dir` (required when enabled) holds the durable resume
   state and cross-process lock — point it at a persistent mount, the same
   one `artifacts.path` uses, not the container's ephemeral working

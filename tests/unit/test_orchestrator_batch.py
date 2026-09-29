@@ -640,6 +640,10 @@ def test_batch_summary_includes_aggregate_cost_tokens_and_time(tmp_path, monkeyp
     assert "Total cost: $0.001200" in summary_msg.description
     assert "total tokens: 10 in / 20 out" in summary_msg.description
     assert "total time:" in summary_msg.description
+    submitted_msg = next(m for m in discord.messages if m.title == "Batch submitted")
+    assert "batch-1" in submitted_msg.description
+    assert "1 user(s)" in submitted_msg.description
+    assert discord.messages.index(submitted_msg) < discord.messages.index(summary_msg)
 
 
 def test_batch_summary_cost_combines_aggregate_with_fallback_rows(tmp_path, monkeypatch) -> None:
