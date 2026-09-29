@@ -500,7 +500,10 @@ def test_orchestrator_wires_configured_max_retries_into_llm_client(monkeypatch, 
 
     orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=True))
 
-    assert captured_kwargs == {"max_retries": app_config().llm.max_retries}
+    assert captured_kwargs == {
+        "max_retries": app_config().llm.max_retries,
+        "auto_router": app_config().llm.auto_router,
+    }
 
 
 def test_orchestrator_dry_run_suppresses_ops_notification(tmp_path) -> None:

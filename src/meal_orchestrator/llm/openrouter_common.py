@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from meal_orchestrator import APP_NAME
+from meal_orchestrator.config import AUTO_ROUTER_MODEL, AutoRouterConfig
 from meal_orchestrator.domain import CanonicalMenu, LlmResult, PromptPayload
 from meal_orchestrator.domain.llm_output import (
     WeekAssessment,
@@ -145,14 +146,18 @@ def build_request_headers(api_key: str) -> dict[str, str]:
 
 
 def build_request_body(
-    model: str, payload: PromptPayload, feedback: str | None = None
+    model: str,
+    payload: PromptPayload,
+    feedback: str | None = None,
+    *,
+    auto_router: AutoRouterConfig | None = None,
 ) -> dict[str, Any]:
     """Build the chat-completion request body for one model call.
 
     Shared by the synchronous client (`openrouter.py`) and the batch client
     (`openrouter_batch.py`) so both send an identical request shape.
     """
-    return {
+    body: dict[str, Any] = {
         "model": model,
         "messages": [{"role": "user", "content": _build_message_content(payload, feedback)}],
         "response_format": _RESPONSE_FORMAT,
@@ -163,6 +168,20 @@ def build_request_body(
         # the usage block only carries token counts, not cost.
         "usage": {"include": True},
     }
+    if model == AUTO_ROUTER_MODEL and auto_router is not None:
+        plugin = _auto_router_plugin(auto_router)
+        if plugin is not None:
+            body["plugins"] = [plugin]
+    return body
+
+
+def _auto_router_plugin(auto_router: AutoRouterConfig) -> dict[str, Any] | None:
+    plugin: dict[str, Any] = {}
+    if auto_router.cost_tier is not None:
+        plugin["cost_tier"] = auto_router.cost_tier
+    if auto_router.allowed_models:
+        plugin["allowed_models"] = auto_router.allowed_models
+    return {"id": "auto-router", **plugin} if plugin else None
 
 
 def parse_batch_completion(

@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from meal_orchestrator.config import AUTO_ROUTER_MODEL, AutoRouterConfig
 from meal_orchestrator.domain import LlmRequest, PromptPayload
 from meal_orchestrator.llm.openrouter import (
     EmptyLlmResponseError,
@@ -15,6 +16,7 @@ from meal_orchestrator.llm.openrouter import (
     OpenRouterResponseError,
     StructuredOutputError,
 )
+from meal_orchestrator.llm.openrouter_common import build_request_body
 from meal_orchestrator.retries import RetryError
 from tests.unit.helpers import canonical_menu, week_assessment
 
@@ -998,3 +1000,70 @@ class TestOpenRouterClientGenerate:
         assert len(bodies) == 3
         third_attempt_texts = [block["text"] for block in bodies[2]["messages"][0]["content"]]
         assert any("did not match the required JSON schema" in t for t in third_attempt_texts)
+
+
+def test_build_request_body_adds_auto_router_plugin_for_auto_model() -> None:
+    body = build_request_body(
+        AUTO_ROUTER_MODEL,
+        _make_request().payload,
+        auto_router=AutoRouterConfig(cost_tier="low", allowed_models=["openai/*"]),
+    )
+
+    assert body["plugins"] == [
+        {"id": "auto-router", "cost_tier": "low", "allowed_models": ["openai/*"]}
+    ]
+
+
+def test_build_request_body_omits_unset_auto_router_fields() -> None:
+    body = build_request_body(
+        AUTO_ROUTER_MODEL,
+        _make_request().payload,
+        auto_router=AutoRouterConfig(cost_tier="high"),
+    )
+
+    assert body["plugins"] == [{"id": "auto-router", "cost_tier": "high"}]
+
+
+def test_build_request_body_omits_plugin_when_auto_router_unconfigured() -> None:
+    body = build_request_body(
+        AUTO_ROUTER_MODEL, _make_request().payload, auto_router=AutoRouterConfig()
+    )
+
+    assert "plugins" not in body
+
+
+def test_build_request_body_omits_plugin_for_concrete_model() -> None:
+    body = build_request_body(
+        "openai/gpt-4o-mini",
+        _make_request().payload,
+        auto_router=AutoRouterConfig(cost_tier="low"),
+    )
+
+    assert "plugins" not in body
+
+
+def test_generate_sends_auto_router_plugin_only_to_auto_model() -> None:
+    bodies = []
+
+    def side_effect(req, timeout=None):
+        body = json.loads(req.data.decode("utf-8"))
+        bodies.append(body)
+        if body["model"] == AUTO_ROUTER_MODEL:
+            return _mock_urlopen(_mock_empty_response())
+        return _mock_urlopen(_mock_response(_assessment_json()))
+
+    with (
+        patch("urllib.request.urlopen", side_effect=side_effect),
+        patch("time.sleep"),
+    ):
+        client = OpenRouterClient(
+            api_key="test-key", max_retries=1, auto_router=AutoRouterConfig(cost_tier="low")
+        )
+        client.generate(
+            _make_request(model=AUTO_ROUTER_MODEL, fallback_models=["openai/gpt-4o-mini"])
+        )
+
+    assert [body.get("plugins") for body in bodies] == [
+        [{"id": "auto-router", "cost_tier": "low"}],
+        None,
+    ]
