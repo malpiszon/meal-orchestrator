@@ -226,7 +226,7 @@ class BatchCoordinator:
             )
         try:
             try:
-                rows, batch_id, model = self._submit_first_accepted(
+                rows, batch_id, batch_model = self._submit_first_accepted(
                     pending, run_id, model, api_key
                 )
             except Exception as exc:
@@ -257,17 +257,18 @@ class BatchCoordinator:
                     submitted_at=submitted_at.isoformat(),
                     week_start=week_start.isoformat(),
                     week_end=week_end.isoformat(),
-                    model=model,
+                    model=batch_model,
                     users=[
                         PendingBatchUser(
                             user_id=user_id, custom_id=self._custom_id(run_id, user_id)
                         )
                         for user_id in pending
                     ],
+                    primary_model=model,
                 ),
             )
             self._notify_submitted(
-                discord_client, run_id, batch_id, len(pending), submitted_at, model
+                discord_client, run_id, batch_id, len(pending), submitted_at, batch_model
             )
             return self._await_and_deliver(
                 batch_id,
@@ -277,7 +278,7 @@ class BatchCoordinator:
                 run_id=run_id,
                 week_start=week_start,
                 week_end=week_end,
-                model=model,
+                model=batch_model,
                 notify_ops=notify_ops,
                 discord_client=discord_client,
                 api_key=api_key,

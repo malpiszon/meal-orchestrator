@@ -6,7 +6,12 @@ from dataclasses import replace
 from datetime import date, datetime
 
 from meal_orchestrator.batch_coordinator import BatchCoordinator
-from meal_orchestrator.batch_runner import PendingBatchState, PendingBatchUser, save_state
+from meal_orchestrator.batch_runner import (
+    PendingBatchState,
+    PendingBatchUser,
+    load_state,
+    save_state,
+)
 from meal_orchestrator.config import AppConfig
 from meal_orchestrator.config.models import BatchConfig
 from meal_orchestrator.domain import LlmResult, ProviderMenuRequest, ProviderResult, WorkflowStatus
@@ -1463,12 +1468,14 @@ def test_batch_submit_tries_fallback_models_before_going_synchronous(
 ) -> None:
     users = [_user(tmp_path, "example")]
     submitted: list = []
+    saved_states: list = []
     monkeypatch.setattr(
         "meal_orchestrator.batch_coordinator.submit_batch",
         _rejecting({"test-model"}, submitted),
     )
 
     def fake_get_batch(batch_id, **_kwargs):
+        saved_states.append(load_state(tmp_path / "batch_state"))
         return {
             "status": "completed",
             "results": [
@@ -1519,6 +1526,59 @@ def test_batch_submit_tries_fallback_models_before_going_synchronous(
 
     assert results[0].status == WorkflowStatus.COMPLETED
     assert [row.model for row in submitted] == ["model-b"]
+    assert saved_states[0].model == "model-b"
+    assert saved_states[0].primary_model == "test-model"
+
+
+def test_batch_resume_retries_start_from_primary_model_not_accepted_fallback(
+    tmp_path, monkeypatch
+) -> None:
+    """A resumed batch submitted with a fallback model must retry failed rows
+    synchronously from the run's primary model, as a non-resumed run does."""
+    users = [_user(tmp_path, "example")]
+    save_state(
+        tmp_path / "batch_state",
+        PendingBatchState(
+            run_id="run-resume",
+            batch_id="batch-existing",
+            submitted_at="2026-06-01T00:00:00+00:00",
+            week_start="2026-06-01",
+            week_end="2026-06-05",
+            model="model-b",
+            users=[PendingBatchUser(user_id="example", custom_id="run-resume:example")],
+            primary_model="test-model",
+        ),
+    )
+    monkeypatch.setattr(
+        "meal_orchestrator.batch_coordinator.get_batch",
+        lambda batch_id, **_kwargs: {"status": "completed", "results": []},
+    )
+    sync_models: list = []
+
+    class RecordingLlmClient:
+        def generate(self, request, **_kwargs):
+            sync_models.append([request.model, *request.fallback_models])
+            return LlmResult(
+                structured=week_assessment(request.payload.menu), model=request.model, attempt=1
+            )
+
+    config = _batch_app_config(tmp_path)
+    config = replace(config, llm=replace(config.llm, fallback_models=["model-b"]))
+    orchestrator = RunOrchestrator(
+        app_config=config,
+        users=users,
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=RecordingLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=FakeDiscordClient(),
+        capability_check=_no_capability_check,
+    )
+
+    results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert results[0].status == WorkflowStatus.COMPLETED
+    assert sync_models == [["test-model", "model-b"]]
 
 
 def test_batch_submit_falls_back_to_sync_when_every_model_is_rejected(
