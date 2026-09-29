@@ -326,9 +326,10 @@ class RunOrchestrator:
             extra={"run_id": state.run_id, "batch_id": state.batch_id, "step": "batch_resume"},
         )
 
+        model = state.primary_model or state.model
         discord_client = self.discord_client_override or build_discord_client()
         notify_ops = build_ops_notifier(
-            self.app_config, discord_client, state.model, state.run_id, dry_run=options.dry_run
+            self.app_config, discord_client, model, state.run_id, dry_run=options.dry_run
         )
 
         if not self.batch_coordinator.try_acquire_lock():
@@ -361,7 +362,7 @@ class RunOrchestrator:
             for pending_user in state.users
             if pending_user.user_id in users_by_id
         ]
-        resume_options = RunOptions(dry_run=False, llm_model=state.primary_model or state.model)
+        resume_options = RunOptions(dry_run=False, llm_model=model)
         results_by_user_id, pending = self._fetch_menus_sequentially(
             selected_users, resume_options, state.run_id, week_start, week_end, clients, notify_ops
         )
