@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import json
+import urllib.error
 from dataclasses import replace
 from datetime import date, datetime
 
 from meal_orchestrator.batch_coordinator import BatchCoordinator
-from meal_orchestrator.batch_runner import PendingBatchState, PendingBatchUser, save_state
+from meal_orchestrator.batch_runner import (
+    PendingBatchState,
+    PendingBatchUser,
+    load_state,
+    save_state,
+)
 from meal_orchestrator.config import AppConfig
 from meal_orchestrator.config.models import BatchConfig
 from meal_orchestrator.domain import LlmResult, ProviderMenuRequest, ProviderResult, WorkflowStatus
@@ -1438,6 +1444,179 @@ def test_batch_submit_failure_falls_back_to_synchronous_and_notifies_ops(
     assert len(email_client.messages) == 1
     assert any(":batch endpoint" in m.description for m in discord.messages)
     assert not (tmp_path / "batch_state" / "run.lock").exists()
+
+
+def _rejecting(model_ids, submitted):
+    def fake_submit_batch(rows, **_kwargs):
+        model = rows[0].model
+        if model in model_ids:
+            raise urllib.error.HTTPError(
+                "https://openrouter.ai/api/beta/batches",
+                400,
+                f"Model '{model}' does not have a :batch endpoint.",
+                None,
+                None,
+            )
+        submitted.extend(rows)
+        return "batch-1"
+
+    return fake_submit_batch
+
+
+def test_batch_submit_tries_fallback_models_before_going_synchronous(
+    tmp_path, monkeypatch
+) -> None:
+    users = [_user(tmp_path, "example")]
+    submitted: list = []
+    saved_states: list = []
+    monkeypatch.setattr(
+        "meal_orchestrator.batch_coordinator.submit_batch",
+        _rejecting({"test-model"}, submitted),
+    )
+
+    def fake_get_batch(batch_id, **_kwargs):
+        saved_states.append(load_state(tmp_path / "batch_state"))
+        return {
+            "status": "completed",
+            "results": [
+                {
+                    "custom_id": row.custom_id,
+                    "response": {
+                        "status_code": 200,
+                        "body": {
+                            "model": row.model,
+                            "choices": [
+                                {
+                                    "message": {
+                                        "content": week_assessment(
+                                            row.payload.menu
+                                        ).model_dump_json()
+                                    }
+                                }
+                            ],
+                            "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+                        },
+                    },
+                    "error": None,
+                }
+                for row in submitted
+            ],
+        }
+
+    monkeypatch.setattr("meal_orchestrator.batch_coordinator.get_batch", fake_get_batch)
+
+    class UnusedLlmClient:
+        def generate(self, request, **_kwargs):
+            raise AssertionError("synchronous LLM client must not be used when batch succeeds")
+
+    config = _batch_app_config(tmp_path)
+    config = replace(config, llm=replace(config.llm, fallback_models=["model-b", "model-c"]))
+    orchestrator = RunOrchestrator(
+        app_config=config,
+        users=users,
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=UnusedLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=FakeDiscordClient(),
+        capability_check=_no_capability_check,
+    )
+
+    results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert results[0].status == WorkflowStatus.COMPLETED
+    assert [row.model for row in submitted] == ["model-b"]
+    assert saved_states[0].model == "model-b"
+    assert saved_states[0].primary_model == "test-model"
+
+
+def test_batch_resume_retries_start_from_primary_model_not_accepted_fallback(
+    tmp_path, monkeypatch
+) -> None:
+    """A resumed batch submitted with a fallback model must retry failed rows
+    synchronously from the run's primary model, as a non-resumed run does."""
+    users = [_user(tmp_path, "example")]
+    save_state(
+        tmp_path / "batch_state",
+        PendingBatchState(
+            run_id="run-resume",
+            batch_id="batch-existing",
+            submitted_at="2026-06-01T00:00:00+00:00",
+            week_start="2026-06-01",
+            week_end="2026-06-05",
+            model="model-b",
+            users=[PendingBatchUser(user_id="example", custom_id="run-resume:example")],
+            primary_model="test-model",
+        ),
+    )
+    monkeypatch.setattr(
+        "meal_orchestrator.batch_coordinator.get_batch",
+        lambda batch_id, **_kwargs: {"status": "completed", "results": []},
+    )
+    sync_models: list = []
+
+    class RecordingLlmClient:
+        def generate(self, request, **_kwargs):
+            sync_models.append([request.model, *request.fallback_models])
+            return LlmResult(
+                structured=week_assessment(request.payload.menu), model=request.model, attempt=1
+            )
+
+    config = _batch_app_config(tmp_path)
+    config = replace(config, llm=replace(config.llm, fallback_models=["model-b"]))
+    orchestrator = RunOrchestrator(
+        app_config=config,
+        users=users,
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=RecordingLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=FakeDiscordClient(),
+        capability_check=_no_capability_check,
+    )
+
+    results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert results[0].status == WorkflowStatus.COMPLETED
+    assert sync_models == [["test-model", "model-b"]]
+
+
+def test_batch_submit_falls_back_to_sync_when_every_model_is_rejected(
+    tmp_path, monkeypatch
+) -> None:
+    users = [_user(tmp_path, "example")]
+    monkeypatch.setattr(
+        "meal_orchestrator.batch_coordinator.submit_batch",
+        _rejecting({"test-model", "model-b"}, []),
+    )
+    monkeypatch.setenv("DISCORD_OPS_WEBHOOK_URL", "https://example.com/ops")
+
+    class SyncLlmClient:
+        def generate(self, request, **_kwargs):
+            return LlmResult(
+                structured=week_assessment(request.payload.menu), model=request.model, attempt=1
+            )
+
+    config = _batch_app_config(tmp_path)
+    config = replace(config, llm=replace(config.llm, fallback_models=["model-b"]))
+    discord = FakeDiscordClient()
+    orchestrator = RunOrchestrator(
+        app_config=config,
+        users=users,
+        project_root=tmp_path,
+        provider_factory=lambda provider_id: RecordingProvider(),
+        llm_client=SyncLlmClient(),
+        email_client=FakeEmailClient(),
+        discord_client=discord,
+        capability_check=_no_capability_check,
+    )
+
+    results = orchestrator.run(RunOptions(week_start=date(2026, 6, 1), dry_run=False))
+
+    assert results[0].status == WorkflowStatus.COMPLETED
+    assert any(
+        "test-model" in m.description and "model-b" in m.description for m in discord.messages
+    )
 
 
 def test_batch_mode_skipped_for_auto_router_model_override(tmp_path, monkeypatch) -> None:

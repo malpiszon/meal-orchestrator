@@ -22,6 +22,7 @@ def _state() -> PendingBatchState:
         week_end="2026-06-05",
         model="openai/gpt-4o-mini",
         users=[PendingBatchUser(user_id="alan", custom_id="run-1:alan")],
+        primary_model="openai/gpt-4.1",
     )
 
 

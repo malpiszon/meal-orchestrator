@@ -40,6 +40,9 @@ class PendingBatchState:
     week_end: str
     model: str
     users: list[PendingBatchUser]
+    # The run's resolved model, when `model` is a fallback the batch endpoint
+    # accepted instead; synchronous retries on resume start from it.
+    primary_model: str | None = None
 
 
 def state_file_path(state_dir: Path) -> Path:
@@ -81,6 +84,7 @@ def load_state(state_dir: Path) -> PendingBatchState | None:
             week_end=data["week_end"],
             model=data["model"],
             users=[PendingBatchUser(**user) for user in data["users"]],
+            primary_model=data.get("primary_model"),
         )
     except Exception:
         logger.warning(
