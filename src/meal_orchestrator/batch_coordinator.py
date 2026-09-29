@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import functools
 import logging
-from dataclasses import dataclass
+import urllib.error
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -224,9 +225,10 @@ class BatchCoordinator:
                 artifact_store=artifact_store,
             )
         try:
-            rows = self._build_rows(pending, run_id)
             try:
-                batch_id = submit_batch(rows, api_key=api_key)
+                rows, batch_id, model = self._submit_first_accepted(
+                    pending, run_id, model, api_key
+                )
             except Exception as exc:
                 logger.error(
                     "batch submission failed: %s; falling back to synchronous processing",
@@ -286,6 +288,38 @@ class BatchCoordinator:
         finally:
             self.release_lock()
 
+    def _submit_first_accepted(
+        self,
+        pending: dict[str, PendingUser],
+        run_id: str,
+        model: str,
+        api_key: str | None,
+    ) -> tuple[list[BatchRequestRow], str, str]:
+        """Submit the batch with `model`, then each of `fallback_models` (not in a
+        dry run, which keeps to its cheap model) while OpenRouter rejects the
+        model itself (400/404, e.g. no `:batch` endpoint). Returns the rows,
+        batch id and the model that was accepted; any other error, or every
+        model rejected, raises so the caller falls back to synchronous processing.
+        """
+        dry_run = next(iter(pending.values())).run_context.dry_run
+        candidates = [model] if dry_run else [model, *self.app_config.llm.fallback_models]
+        rejections = []
+        for candidate in candidates:
+            rows = self._build_rows(pending, run_id, candidate)
+            try:
+                return rows, submit_batch(rows, api_key=api_key), candidate
+            except urllib.error.HTTPError as exc:
+                if exc.code not in (400, 404):
+                    raise
+                logger.warning(
+                    "batch model %s rejected: %s",
+                    candidate,
+                    exc,
+                    extra={"run_id": run_id, "step": "batch_submit"},
+                )
+                rejections.append(f"{candidate}: {exc}")
+        raise RuntimeError("every candidate model was rejected: " + "; ".join(rejections))
+
     def _submit_fallback(
         self,
         pending: dict[str, PendingUser],
@@ -332,7 +366,7 @@ class BatchCoordinator:
         restarted invocation. Caller (`RunOrchestrator`) is responsible for
         holding the run lock across its own menu re-fetch and this call.
         """
-        rows = self._build_rows(pending, state.run_id)
+        rows = self._build_rows(pending, state.run_id, state.model)
         return self._await_and_deliver(
             state.batch_id,
             rows,
@@ -350,7 +384,7 @@ class BatchCoordinator:
         )
 
     def _build_rows(
-        self, pending: dict[str, PendingUser], run_id: str
+        self, pending: dict[str, PendingUser], run_id: str, model: str
     ) -> list[BatchRequestRow]:
         rows = []
         for user_id, pending_user in pending.items():
@@ -360,11 +394,12 @@ class BatchCoordinator:
                 pending_user.outcome.menu,
                 pending_user.outcome.log_context,
             )
+            llm_request = replace(llm_request, model=model)
             pending_user.outcome.artifacts.save_llm_request(llm_request)
             rows.append(
                 BatchRequestRow(
                     custom_id=self._custom_id(run_id, user_id),
-                    model=llm_request.model,
+                    model=model,
                     payload=llm_request.payload,
                 )
             )
