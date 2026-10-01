@@ -772,8 +772,124 @@ def test_execute_from_llm_result_reports_correct_failed_step_on_save_error(tmp_p
     assert result.failed_step == "save_llm_response"
 
 
+class FakeMoWebClient:
+    def __init__(self, error: Exception | None = None) -> None:
+        self.payloads: list[dict] = []
+        self.error = error
+
+    def send(self, payload: dict) -> None:
+        self.payloads.append(payload)
+        if self.error is not None:
+            raise self.error
+
+
+def _mo_web_user(tmp_path):
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("Choose meals.", encoding="utf-8")
+    return replace(user_config(PathLikePrompt(prompt_file, tmp_path)), id="example")
+
+
+def test_mo_web_receives_payload_after_email(tmp_path) -> None:
+    email = FakeEmailClient()
+    mo_web = FakeMoWebClient()
+
+    result = _executor(
+        tmp_path, FakeProvider(), FakeLlmClient(), email, FakeDiscordClient(), mo_web=mo_web
+    ).execute(_mo_web_user(tmp_path), _context(dry_run=False))
+
+    assert result.status == WorkflowStatus.COMPLETED
+    assert len(email.messages) == 1
+    assert len(mo_web.payloads) == 1
+    assert mo_web.payloads[0]["run_id"] == "run-1"
+    assert mo_web.payloads[0]["user"] == {"email": "user@example.com"}
+
+
+def test_mo_web_skipped_on_dry_run(tmp_path) -> None:
+    mo_web = FakeMoWebClient()
+
+    _executor(
+        tmp_path,
+        FakeProvider(),
+        FakeLlmClient(),
+        FakeEmailClient(),
+        FakeDiscordClient(),
+        mo_web=mo_web,
+    ).execute(_mo_web_user(tmp_path), _context(dry_run=True))
+
+    assert mo_web.payloads == []
+
+
+def test_mo_web_runs_without_email_client(tmp_path) -> None:
+    mo_web = FakeMoWebClient()
+
+    result = _executor(
+        tmp_path, FakeProvider(), FakeLlmClient(), None, FakeDiscordClient(), mo_web=mo_web
+    ).execute(_mo_web_user(tmp_path), _context(dry_run=False))
+
+    assert result.status == WorkflowStatus.COMPLETED
+    assert len(mo_web.payloads) == 1
+
+
+def test_mo_web_failure_keeps_email_and_success_and_alerts_ops(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DISCORD_OPS_WEBHOOK_URL", "https://discord.example/ops")
+    email = FakeEmailClient()
+    discord = FakeDiscordClient()
+    artifact_store = ArtifactStore(
+        ArtifactConfig(path=tmp_path / "artifacts", retention_days=14, max_runs=10)
+    )
+
+    result = _executor(
+        tmp_path,
+        FakeProvider(),
+        FakeLlmClient(),
+        email,
+        discord,
+        artifact_store=artifact_store,
+        mo_web=FakeMoWebClient(RuntimeError("connection refused")),
+    ).execute(_mo_web_user(tmp_path), _context(dry_run=False))
+
+    assert result.status == WorkflowStatus.COMPLETED
+    assert result.failed_step is None
+    assert len(email.messages) == 1
+    alerts = [m for m in discord.messages if m.title == "mo-web delivery failed"]
+    assert len(alerts) == 1
+    assert "connection refused" in alerts[0].description
+    user_dir = tmp_path / "artifacts" / "run-1" / "example"
+    assert (user_dir / "mo_web_payload.json").exists()
+    metadata = json.loads((user_dir / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["status"] == "completed"
+    assert "failed_step" not in metadata
+
+
+def test_execute_from_llm_result_mo_web_failure_keeps_success(tmp_path) -> None:
+    user = _mo_web_user(tmp_path)
+    run_context = _context(dry_run=False)
+    email = FakeEmailClient()
+    mo_web = FakeMoWebClient(RuntimeError("connection refused"))
+    executor = _executor(
+        tmp_path, FakeProvider(), FakeLlmClient(), email, FakeDiscordClient(), mo_web=mo_web
+    )
+    outcome = executor.fetch_menu(user, run_context)
+    llm_result = LlmResult(structured=week_assessment(outcome.menu), model="test-model", attempt=1)
+
+    result = executor.execute_from_llm_result(
+        user,
+        run_context,
+        outcome.menu,
+        llm_result,
+        outcome.artifacts,
+        outcome.state,
+        outcome.log_context,
+    )
+
+    assert result.status == WorkflowStatus.COMPLETED
+    assert result.failed_step is None
+    assert len(email.messages) == 1
+    assert len(mo_web.payloads) == 1
+
+
 def _executor(
-    tmp_path, provider, llm, email, discord, artifact_store=None, config=None
+    tmp_path, provider, llm, email, discord, artifact_store=None, config=None, mo_web=None
 ) -> UserWorkflowExecutor:
     return UserWorkflowExecutor(
         app_config=config or app_config(),
@@ -783,6 +899,7 @@ def _executor(
         discord_client=discord,
         project_root=tmp_path,
         artifact_store=artifact_store,
+        mo_web_client=mo_web,
     )
 
 

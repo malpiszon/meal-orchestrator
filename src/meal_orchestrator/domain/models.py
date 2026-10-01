@@ -52,6 +52,9 @@ class Nutrition:
 class MealVariant:
     name: str
     composition: str
+    # Dish-level id that stays the same across weeks and sizes. Kept out of
+    # to_compact_dict() so the LLM prompt is unchanged; mo-web keys on it.
+    provider_meal_id: str
     nutrition: Nutrition = field(default_factory=Nutrition)
 
     def to_compact_dict(self) -> dict[str, Any]:

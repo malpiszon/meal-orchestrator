@@ -41,3 +41,21 @@ def test_normalizer_filters_to_purchased_meals_and_size() -> None:
             ],
         }
     ]
+
+
+def test_normalizer_maps_dish_id_shared_across_sizes() -> None:
+    raw_menu = json.loads(Path("tests/fixtures/provider_menu_raw.json").read_text())
+
+    def variant_for(size: str):
+        menu = normalize_example_provider_menu(
+            raw_menu=raw_menu,
+            provider_id="example_provider",
+            week_start=date(2026, 6, 1),
+            week_end=date(2026, 6, 1),
+            user_id="example",
+            purchased_meals=[PurchasedMeal(type="breakfast", size=size)],
+        )
+        return menu.days[0].meals[0].variants[0]
+
+    assert variant_for("M").provider_meal_id == "101"
+    assert variant_for("XL").provider_meal_id == "101"

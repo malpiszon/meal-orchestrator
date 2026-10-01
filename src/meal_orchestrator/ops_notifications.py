@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
+import urllib.error
+from datetime import date
 
 from meal_orchestrator.config import AppConfig
 from meal_orchestrator.delivery import DiscordClient
 from meal_orchestrator.delivery.discord import COLOR_ERROR, COLOR_SUCCESS, COLOR_WARNING
 from meal_orchestrator.domain import DiscordMessage, WorkflowResult, WorkflowStatus
+from meal_orchestrator.retries import RetryError
 from meal_orchestrator.worker_pool import NotifyOps
 
 logger = logging.getLogger(__name__)
@@ -106,6 +110,87 @@ def notify_capability_check_failed(
         run_id=run_id,
         step="capability_check",
     )
+
+
+# Discord's embed description limit.
+_DISCORD_DESCRIPTION_LIMIT = 4096
+_MO_WEB_ALERT_MAX_ISSUES = 5
+_MO_WEB_ALERT_MAX_ISSUE_CHARS = 300
+
+
+def notify_mo_web_delivery_failed(
+    *,
+    discord_client: DiscordClient,
+    app_config: AppConfig,
+    run_id: str,
+    user_id: str,
+    week_start: date,
+    error: Exception,
+) -> None:
+    webhook_env = ops_webhook_env(app_config)
+    if webhook_env is None:
+        return
+    notify_safely(
+        discord_client,
+        DiscordMessage(
+            webhook_env=webhook_env,
+            title="mo-web delivery failed",
+            description=mo_web_failure_description(
+                run_id=run_id, user_id=user_id, week_start=week_start, error=error
+            ),
+            color=COLOR_ERROR,
+        ),
+        run_id=run_id,
+        step="mo_web",
+        user_id=user_id,
+    )
+
+
+def mo_web_failure_description(
+    *, run_id: str, user_id: str, week_start: date, error: Exception
+) -> str:
+    """Describe a failed mo-web delivery: HTTP status plus mo-web's `error` and the
+    first few `issues`, kept under Discord's embed limit. The full list is in the
+    log and the saved mo_web_payload.json can be re-POSTed after a fix.
+    """
+    cause = error.last_exception if isinstance(error, RetryError) else error
+    header = (
+        f"mo-web delivery failed for user {user_id}, "
+        f"week {week_start.isoformat()} (run {run_id})"
+    )
+    if not isinstance(cause, urllib.error.HTTPError):
+        return _truncate(f"{header}: {cause}")
+    lines = [f"{header}: HTTP {cause.code}"]
+    body = _json_object(getattr(cause, "response_body", None))
+    if body.get("error") is not None:
+        lines.append(f"error: {body['error']}")
+    issues = body.get("issues")
+    if isinstance(issues, list) and issues:
+        lines.append("issues:")
+        for issue in issues[:_MO_WEB_ALERT_MAX_ISSUES]:
+            text = json.dumps(issue, ensure_ascii=False)
+            if len(text) > _MO_WEB_ALERT_MAX_ISSUE_CHARS:
+                text = text[: _MO_WEB_ALERT_MAX_ISSUE_CHARS - 1] + "…"
+            lines.append(f"- {text}")
+        if len(issues) > _MO_WEB_ALERT_MAX_ISSUES:
+            lines.append(f"… and {len(issues) - _MO_WEB_ALERT_MAX_ISSUES} more")
+    return _truncate("\n".join(lines))
+
+
+def _json_object(raw: str | None) -> dict:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _truncate(text: str) -> str:
+    if len(text) <= _DISCORD_DESCRIPTION_LIMIT:
+        return text
+    return text[: _DISCORD_DESCRIPTION_LIMIT - 1] + "…"
 
 
 def _build_message(

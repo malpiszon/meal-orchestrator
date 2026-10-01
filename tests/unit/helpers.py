@@ -77,7 +77,9 @@ def canonical_menu(*, complete: bool = True) -> CanonicalMenu:
             meals=[
                 CanonicalMeal(
                     type="breakfast",
-                    variants=[MealVariant(name="Meal", composition="Ingredients")],
+                    variants=[
+                        MealVariant(name="Meal", composition="Ingredients", provider_meal_id="1")
+                    ],
                 )
             ],
         )

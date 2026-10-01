@@ -8,6 +8,7 @@ from pathlib import Path
 
 from meal_orchestrator.artifacts import ArtifactStore
 from meal_orchestrator.config.models import ArtifactConfig
+from meal_orchestrator.delivery.mo_web import build_mo_web_payload
 from meal_orchestrator.domain import LlmRequest, LlmResult, PromptPayload
 from tests.unit.helpers import canonical_menu, week_assessment
 
@@ -52,6 +53,21 @@ def test_saves_all_artifacts(tmp_path: Path) -> None:
     assert (run_dir / "llm_request.json").exists()
     assert (run_dir / "llm_response.json").exists()
     assert (run_dir / "metadata.json").exists()
+
+
+def test_saves_mo_web_payload_without_token(tmp_path: Path) -> None:
+    store = ArtifactStore(_config(tmp_path))
+    run = store.for_run("run-1", "example")
+    menu = canonical_menu()
+    payload = build_mo_web_payload(menu, week_assessment(menu), "user@example.com", "run-1")
+
+    run.save_mo_web_payload(payload)
+
+    text = (tmp_path / "artifacts" / "run-1" / "example" / "mo_web_payload.json").read_text()
+    assert json.loads(text) == payload
+    assert '"provider_meal_id": "1"' in text
+    assert "Bearer" not in text
+    assert "token" not in text.lower()
 
 
 def test_artifacts_content(tmp_path: Path) -> None:

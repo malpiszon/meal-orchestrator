@@ -126,8 +126,8 @@ class TestValidateCompleteness:
                         CanonicalMeal(
                             type="breakfast",
                             variants=[
-                                MealVariant(name="A", composition="..."),
-                                MealVariant(name="B", composition="..."),
+                                MealVariant(name="A", composition="...", provider_meal_id="1"),
+                                MealVariant(name="B", composition="...", provider_meal_id="2"),
                             ],
                         )
                     ],

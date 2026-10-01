@@ -28,11 +28,13 @@ For each configured user, per run:
    feedback if the response is malformed or incomplete.
 5. Render the assessment as plain text and email it, and post a Discord
    notification.
+6. Optionally deliver the week (menu + every variant's score) to the mo-web
+   dashboard, best-effort (`delivery.mo_web`, see `delivery/mo_web.py`).
 
 A run fetches every user's menu (step 1) sequentially, one at a time — this
 is deliberate, so a growing number of users never sends concurrent requests
 to the menu provider. Once a user's menu is fetched, the remaining steps
-(2-5) run in parallel across users, bounded by `runtime.max_concurrent_users`
+(2-6) run in parallel across users, bounded by `runtime.max_concurrent_users`
 (default 5). The run also sends an operational Discord notification per user
 summarizing success/failure (batch mode, see Known limitations, instead
 summarizes successes into one message and only pages per-user on failure).
@@ -99,7 +101,7 @@ src/meal_orchestrator/
   providers/           provider adapters, one package per provider
   llm/                 OpenRouter client, model capability check, OpenRouter batch API client (openrouter_batch.py)
   rendering/           renders a structured LLM assessment to plain text
-  delivery/            Resend email client, Discord webhook client
+  delivery/            Resend email client, Discord webhook client, mo-web delivery client
   observability/       structured logging setup
   artifacts.py         per-run debug artifact persistence
   retries.py           shared retry/backoff helper
@@ -137,6 +139,8 @@ Secrets are read from environment variables, never from YAML:
 - `RESEND_API_KEY` — optional; email delivery is skipped when absent.
 - `DISCORD_OPS_WEBHOOK_URL` — optional; operational notifications are
   skipped when absent.
+- `delivery.mo_web.token_env` (e.g. `MO_WEB_TOKEN`) — optional; mo-web
+  delivery is skipped with a warning when absent.
 - Each user's `discord_webhook_env` (referenced by name from
   `users.yaml`) — optional; that user's Discord notification is skipped when
   absent.
@@ -212,7 +216,8 @@ manual trigger; see `.github/workflows/auto-release.yml`.
 
 1. Add a `providers/<name>/` package with a client (raw HTTP fetch, with
    retry for transient failures) and a normalizer (raw response -> canonical
-   menu).
+   menu). Each `MealVariant.provider_meal_id` must be the provider's
+   dish-level id, stable across weeks and sizes (mo-web keys meals by it).
 2. Implement a class extending the `ProviderAdapter` base class in
    `providers/__init__.py`: a `provider_id` attribute and
    `get_canonical_week_menu(request) -> ProviderResult`. Optionally override
@@ -262,8 +267,9 @@ manual trigger; see `.github/workflows/auto-release.yml`.
 - **Retry vs. fail-fast vs. best-effort, chosen per step.** Provider fetch
   and OpenRouter calls retry transient errors with backoff; config loading
   and normalization fail fast; email delivery retries and blocks the
-  workflow on exhaustion; Discord notifications are best-effort and never
-  block or fail a run.
+  workflow on exhaustion; Discord notifications and mo-web delivery are
+  best-effort and never block or fail a run (a failed mo-web delivery sends
+  an ops alert; `mo_web_payload.json` in the user's artifacts can be re-POSTed).
 - **File-based configuration.** YAML plus environment variables for secrets;
   no database — adequate for a small, fixed set of users on a weekly
   schedule.

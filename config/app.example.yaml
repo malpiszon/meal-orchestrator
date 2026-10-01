@@ -40,6 +40,13 @@ providers:
 delivery:
   email_from: "Meal Orchestrator <meals@example.com>"
   operational_discord_webhook_env: "DISCORD_OPS_WEBHOOK_URL"
+  # Optional best-effort delivery of each user's week to the mo-web dashboard,
+  # after the email. Skipped with a warning when token_env's variable is unset.
+  mo_web:
+    enabled: false
+    url: "http://localhost:4321/api/mo/deliveries"
+    token_env: "MO_WEB_TOKEN"
+    timeout_seconds: 10
 
 artifacts:
   enabled: true

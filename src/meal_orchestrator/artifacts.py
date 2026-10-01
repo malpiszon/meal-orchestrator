@@ -42,6 +42,9 @@ class RunArtifacts:
     def save_metadata(self, metadata: dict[str, Any]) -> None:
         pass
 
+    def save_mo_web_payload(self, payload: dict[str, Any]) -> None:
+        pass
+
 
 class _FilesystemRunArtifacts(RunArtifacts):
     def __init__(self, run_dir: Path) -> None:
@@ -94,6 +97,12 @@ class _FilesystemRunArtifacts(RunArtifacts):
         self._write_safe(
             "metadata.json",
             lambda: _write_json(self._run_dir / "metadata.json", metadata),
+        )
+
+    def save_mo_web_payload(self, payload: dict[str, Any]) -> None:
+        self._write_safe(
+            "mo_web_payload.json",
+            lambda: _write_json(self._run_dir / "mo_web_payload.json", payload),
         )
 
     def _write_safe(self, name: str, write: Any) -> None:

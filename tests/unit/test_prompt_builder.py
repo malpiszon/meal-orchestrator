@@ -20,7 +20,11 @@ def test_prompt_builder_combines_app_prompt_user_prompt_and_compact_menu(tmp_pat
                 meals=[
                     CanonicalMeal(
                         type="breakfast",
-                        variants=[MealVariant(name="Tortilla", composition="Chicken")],
+                        variants=[
+                            MealVariant(
+                                name="Tortilla", composition="Chicken", provider_meal_id="1"
+                            )
+                        ],
                     )
                 ],
             )

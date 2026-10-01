@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Any, Protocol
 
 from meal_orchestrator.delivery.discord import DiscordWebhookClient
 from meal_orchestrator.domain import DiscordMessage, EmailMessage
@@ -12,6 +12,10 @@ class EmailClient(Protocol):
 
 class DiscordClient(Protocol):
     def notify(self, message: DiscordMessage) -> None: ...
+
+
+class MoWebClient(Protocol):
+    def send(self, payload: dict[str, Any]) -> None: ...
 
 
 def build_discord_client() -> DiscordWebhookClient:

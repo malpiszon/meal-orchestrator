@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import yaml
 
@@ -14,6 +15,7 @@ from meal_orchestrator.config.models import (
     BatchConfig,
     DeliveryConfig,
     LlmConfig,
+    MoWebDeliveryConfig,
     RuntimeConfig,
     UserConfig,
 )
@@ -58,6 +60,7 @@ def load_app_config(path: Path) -> AppConfig:
             operational_discord_webhook_env=_optional(
                 data, "delivery", "operational_discord_webhook_env"
             ),
+            mo_web=_parse_mo_web(_optional(data, "delivery", "mo_web")),
         ),
         artifacts=_parse_artifacts(data),
     )
@@ -181,6 +184,47 @@ def _parse_artifacts(data: dict[str, Any]) -> ArtifactConfig | None:
         path=Path(str(path_raw)),
         retention_days=retention_days,
         max_runs=max_runs,
+    )
+
+
+# Hosts allowed over plain http: the mo-web dev server, reached directly or from Docker.
+_MO_WEB_HTTP_HOSTS = {"localhost", "127.0.0.1", "host.docker.internal"}
+
+
+def _parse_mo_web(raw: Any) -> MoWebDeliveryConfig | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ConfigError("delivery.mo_web must be a mapping")
+    enabled = raw.get("enabled")
+    if not isinstance(enabled, bool):
+        raise ConfigError("delivery.mo_web.enabled must be a boolean")
+    if not enabled:
+        return None
+    url = raw.get("url")
+    if not isinstance(url, str) or not url:
+        raise ConfigError("delivery.mo_web.url is required when delivery.mo_web is enabled")
+    parsed = urlparse(url)
+    if not (
+        parsed.scheme == "https"
+        or (parsed.scheme == "http" and parsed.hostname in _MO_WEB_HTTP_HOSTS)
+    ):
+        raise ConfigError(
+            "delivery.mo_web.url must use https:// (http:// is allowed only for "
+            f"{', '.join(sorted(_MO_WEB_HTTP_HOSTS))})"
+        )
+    token_env = raw.get("token_env")
+    if not isinstance(token_env, str) or not token_env:
+        raise ConfigError(
+            "delivery.mo_web.token_env is required when delivery.mo_web is enabled"
+        )
+    return MoWebDeliveryConfig(
+        url=url,
+        token_env=token_env,
+        timeout_seconds=_positive_int(
+            raw.get("timeout_seconds", MoWebDeliveryConfig.timeout_seconds),
+            "delivery.mo_web.timeout_seconds",
+        ),
     )
 
 

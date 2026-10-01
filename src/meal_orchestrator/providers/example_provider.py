@@ -114,6 +114,7 @@ def _normalize_variant(raw_variant: dict[str, Any]) -> MealVariant:
     return MealVariant(
         name=_required(raw_variant, "name"),
         composition=_normalize_whitespace(_required(raw_variant, "composition")),
+        provider_meal_id=_required(raw_variant, "id"),
         nutrition=Nutrition(
             **{field: nutrition[field] for field in NUTRITION_FIELDS if field in nutrition}
         ),
@@ -149,6 +150,7 @@ def _placeholder_day(day: date) -> dict:
                 "sizes": {
                     "M": [
                         {
+                            "id": "1",
                             "name": "Tortilla",
                             "composition": "Chicken, vegetables, tortilla, yogurt sauce",
                             "nutrition": {
@@ -169,6 +171,7 @@ def _placeholder_day(day: date) -> dict:
                 "sizes": {
                     "XL": [
                         {
+                            "id": "2",
                             "name": "Rice bowl",
                             "composition": "Rice, turkey, broccoli, sesame sauce",
                             "nutrition": {
