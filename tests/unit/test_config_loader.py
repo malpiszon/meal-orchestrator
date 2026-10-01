@@ -684,3 +684,88 @@ def test_batch_config_allows_auto_router_model_with_fallback_models(tmp_path) ->
 
     assert app.llm.model == "openrouter/auto"
     assert app.llm.batch.enabled
+
+
+def _load_with_mo_web(tmp_path, mo_web_yaml: str):
+    path = tmp_path / "app.yaml"
+    path.write_text(_base_app_yaml() + "  mo_web:\n" + mo_web_yaml, encoding="utf-8")
+    return load_app_config(path)
+
+
+def test_mo_web_config_absent_returns_none(tmp_path) -> None:
+    path = tmp_path / "app.yaml"
+    path.write_text(_base_app_yaml(), encoding="utf-8")
+
+    assert load_app_config(path).delivery.mo_web is None
+
+
+def test_mo_web_config_disabled_returns_none_without_validating(tmp_path) -> None:
+    app = _load_with_mo_web(tmp_path, "    enabled: false\n    url: http://example.com/x\n")
+
+    assert app.delivery.mo_web is None
+
+
+def test_mo_web_config_loaded_with_default_timeout(tmp_path) -> None:
+    app = _load_with_mo_web(
+        tmp_path,
+        "    enabled: true\n"
+        "    url: http://localhost:4321/api/mo/deliveries\n"
+        "    token_env: MO_WEB_TOKEN\n",
+    )
+
+    assert app.delivery.mo_web is not None
+    assert app.delivery.mo_web.url == "http://localhost:4321/api/mo/deliveries"
+    assert app.delivery.mo_web.token_env == "MO_WEB_TOKEN"
+    assert app.delivery.mo_web.timeout_seconds == 10
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://mo-web.example.com/api/mo/deliveries",
+        "http://127.0.0.1:4321/api/mo/deliveries",
+        "http://host.docker.internal:4321/api/mo/deliveries",
+    ],
+)
+def test_mo_web_config_accepts_allowed_urls(tmp_path, url: str) -> None:
+    app = _load_with_mo_web(
+        tmp_path, f"    enabled: true\n    url: {url}\n    token_env: MO_WEB_TOKEN\n"
+    )
+
+    assert app.delivery.mo_web.url == url
+
+
+@pytest.mark.parametrize(
+    "url", ["http://example.com/api/mo/deliveries", "ftp://localhost/x", "localhost:4321"]
+)
+def test_mo_web_config_rejects_insecure_urls(tmp_path, url: str) -> None:
+    with pytest.raises(ConfigError, match="delivery.mo_web.url"):
+        _load_with_mo_web(
+            tmp_path, f"    enabled: true\n    url: {url}\n    token_env: MO_WEB_TOKEN\n"
+        )
+
+
+def test_mo_web_config_requires_url(tmp_path) -> None:
+    with pytest.raises(ConfigError, match="delivery.mo_web.url"):
+        _load_with_mo_web(tmp_path, "    enabled: true\n    token_env: MO_WEB_TOKEN\n")
+
+
+def test_mo_web_config_requires_token_env(tmp_path) -> None:
+    with pytest.raises(ConfigError, match="delivery.mo_web.token_env"):
+        _load_with_mo_web(tmp_path, "    enabled: true\n    url: https://mo-web.example.com/\n")
+
+
+def test_mo_web_config_requires_boolean_enabled(tmp_path) -> None:
+    with pytest.raises(ConfigError, match="delivery.mo_web.enabled"):
+        _load_with_mo_web(tmp_path, "    url: https://mo-web.example.com/\n")
+
+
+def test_mo_web_config_rejects_non_positive_timeout(tmp_path) -> None:
+    with pytest.raises(ConfigError, match="delivery.mo_web.timeout_seconds"):
+        _load_with_mo_web(
+            tmp_path,
+            "    enabled: true\n"
+            "    url: https://mo-web.example.com/\n"
+            "    token_env: MO_WEB_TOKEN\n"
+            "    timeout_seconds: 0\n",
+        )

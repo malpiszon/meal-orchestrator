@@ -30,7 +30,8 @@ def _menu_with_variants(*names: str) -> CanonicalMenu:
                     CanonicalMeal(
                         type="breakfast",
                         variants=[
-                            MealVariant(name=name, composition="Ingredients") for name in names
+                            MealVariant(name=name, composition="Ingredients", provider_meal_id=name)
+                            for name in names
                         ],
                     )
                 ],

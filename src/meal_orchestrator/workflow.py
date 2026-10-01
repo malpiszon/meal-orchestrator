@@ -13,8 +13,9 @@ from typing import NamedTuple
 from meal_orchestrator import __version__
 from meal_orchestrator.artifacts import ArtifactStore, RunArtifacts
 from meal_orchestrator.config import AppConfig, UserConfig
-from meal_orchestrator.delivery import DiscordClient, EmailClient
+from meal_orchestrator.delivery import DiscordClient, EmailClient, MoWebClient
 from meal_orchestrator.delivery.discord import COLOR_SUCCESS, COLOR_WARNING
+from meal_orchestrator.delivery.mo_web import build_mo_web_payload
 from meal_orchestrator.domain import (
     CanonicalMenu,
     DiscordMessage,
@@ -32,6 +33,7 @@ from meal_orchestrator.llm import (
     OpenRouterHttpError,
     OpenRouterResponseError,
 )
+from meal_orchestrator.ops_notifications import notify_mo_web_delivery_failed
 from meal_orchestrator.prompt_builder import build_prompt_payload
 from meal_orchestrator.providers import (
     MenuUnavailableError,
@@ -173,6 +175,7 @@ class UserWorkflowExecutor:
         discord_client: DiscordClient,
         project_root: Path,
         artifact_store: ArtifactStore | None = None,
+        mo_web_client: MoWebClient | None = None,
     ) -> None:
         self.app_config = app_config
         self.provider = provider
@@ -181,6 +184,7 @@ class UserWorkflowExecutor:
         self.discord_client = discord_client
         self.project_root = project_root
         self.artifact_store = artifact_store or ArtifactStore()
+        self.mo_web_client = mo_web_client
 
     def execute(self, user: UserConfig, run_context: RunContext) -> WorkflowResult:
         """Run the full per-user pipeline synchronously (menu fetch included).
@@ -285,6 +289,9 @@ class UserWorkflowExecutor:
             state.failed_step = "discord"
             self._notify_plan_ready(user, run_context, log_context)
 
+            # Best effort and never raises, so it leaves failed_step alone.
+            self._deliver_to_mo_web(user, run_context, menu, llm_result, artifacts, log_context)
+
             logger.info("user workflow completed", extra={**log_context, "step": "complete"})
             state.status = WorkflowStatus.COMPLETED
             retry_count = llm_result.attempt - 1
@@ -338,6 +345,9 @@ class UserWorkflowExecutor:
 
             state.failed_step = "discord"
             self._notify_plan_ready(user, run_context, log_context)
+
+            # Best effort and never raises, so it leaves failed_step alone.
+            self._deliver_to_mo_web(user, run_context, menu, llm_result, artifacts, log_context)
 
             logger.info("user workflow completed", extra={**log_context, "step": "complete"})
             state.status = WorkflowStatus.COMPLETED
@@ -521,6 +531,46 @@ class UserWorkflowExecutor:
                 "discord user notification failed (best effort)",
                 exc_info=True,
                 extra={**log_context, "step": "discord", "error": str(exc)},
+            )
+
+    def _deliver_to_mo_web(
+        self,
+        user: UserConfig,
+        run_context: RunContext,
+        menu: CanonicalMenu,
+        llm_result: LlmResult,
+        artifacts: RunArtifacts,
+        log_context: dict,
+    ) -> None:
+        if run_context.dry_run or self.mo_web_client is None:
+            logger.info("mo-web delivery skipped", extra={**log_context, "step": "mo_web"})
+            return
+        try:
+            payload = build_mo_web_payload(
+                menu, llm_result.structured, user.email, run_context.run_id
+            )
+            # Saved before sending: it's what an operator re-POSTs after a failure.
+            artifacts.save_mo_web_payload(payload)
+            self.mo_web_client.send(payload)
+        except Exception as exc:
+            cause = getattr(exc, "last_exception", exc)
+            logger.warning(
+                "mo-web delivery failed (best effort)",
+                exc_info=True,
+                extra={
+                    **log_context,
+                    "step": "mo_web",
+                    "error": str(exc),
+                    "response_body": getattr(cause, "response_body", None),
+                },
+            )
+            notify_mo_web_delivery_failed(
+                discord_client=self.discord_client,
+                app_config=self.app_config,
+                run_id=run_context.run_id,
+                user_id=user.id,
+                week_start=run_context.week_start,
+                error=exc,
             )
 
     def _notify_menu_unavailable(

@@ -122,8 +122,8 @@ def _normalize_day(
             )
 
         variants: list[MealVariant] = [
-            _to_meal_variant(_pick_size(size_variants, pm.size))
-            for size_variants in dishes.values()
+            _to_meal_variant(_pick_size(size_variants, pm.size), str(configurable_id))
+            for configurable_id, size_variants in dishes.items()
         ]
         canonical_meals.append(CanonicalMeal(type=pm.type, variants=variants))
 
@@ -177,7 +177,7 @@ def _pick_size(
     )
 
 
-def _to_meal_variant(product: dict[str, Any]) -> MealVariant:
+def _to_meal_variant(product: dict[str, Any], provider_meal_id: str) -> MealVariant:
     name = product.get("name")
     if not name:
         raise ValueError(f"ntfy: product id={product.get('id')} has no name")
@@ -187,6 +187,7 @@ def _to_meal_variant(product: dict[str, Any]) -> MealVariant:
     return MealVariant(
         name=name,
         composition=composition,
+        provider_meal_id=provider_meal_id,
         nutrition=Nutrition(
             protein_g=_float_or_none(product, "protein"),
             fat_g=_float_or_none(product, "fat"),

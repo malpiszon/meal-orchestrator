@@ -36,7 +36,8 @@ def _menu_with_variants(*names: str) -> CanonicalMenu:
                     CanonicalMeal(
                         type="breakfast",
                         variants=[
-                            MealVariant(name=name, composition="Ingredients") for name in names
+                            MealVariant(name=name, composition="Ingredients", provider_meal_id=name)
+                            for name in names
                         ],
                     )
                 ],
@@ -198,7 +199,8 @@ def test_greeting_pluralises_multiple_high_scores() -> None:
                 date=date(2026, 6, 1),
                 meals=[
                     CanonicalMeal(
-                        type="breakfast", variants=[MealVariant(name="A", composition="x")]
+                        type="breakfast",
+                        variants=[MealVariant(name="A", composition="x", provider_meal_id="1")],
                     )
                 ],
             ),
@@ -206,7 +208,8 @@ def test_greeting_pluralises_multiple_high_scores() -> None:
                 date=date(2026, 6, 2),
                 meals=[
                     CanonicalMeal(
-                        type="breakfast", variants=[MealVariant(name="B", composition="x")]
+                        type="breakfast",
+                        variants=[MealVariant(name="B", composition="x", provider_meal_id="2")],
                     )
                 ],
             ),
@@ -292,6 +295,7 @@ def test_full_week_stays_under_gmail_clip_threshold() -> None:
                 MealVariant(
                     name=f"Danie {meal_type} wariant {i} z dłuższym opisem składników i sosem",
                     composition="Skladniki, skladniki, skladniki.",
+                    provider_meal_id=str(i),
                 )
                 for i in range(3)
             ]

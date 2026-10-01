@@ -181,12 +181,12 @@ def _make_raw_day(
     }
 
 
-def _load_fixture_raw_day(fixture_date: str) -> dict:
-    data = json.loads((_FIXTURE_DIR / f"raw_offer6_{fixture_date}.json").read_bytes())
+def _load_fixture_raw_day(fixture_date: str, offer_id: int = 6) -> dict:
+    data = json.loads((_FIXTURE_DIR / f"raw_offer{offer_id}_{fixture_date}.json").read_bytes())
     root = data.get("data", data)
     return {
         "date": fixture_date,
-        "offer_id": 6,
+        "offer_id": offer_id,
         "results": root.get("results", []),
         "includes": root.get("includes", {}),
     }
@@ -797,3 +797,26 @@ class TestNormalizeWithRealFixtures:
 
         snack = next(m for m in menu.to_compact_dict()["days"][0]["meals"] if m["type"] == "snack")
         assert len(snack["variants"]) == 2
+
+    @pytest.mark.parametrize(
+        ("offer_id", "fixture_date", "week_start", "week_end"),
+        [
+            (6, "2026-06-30", date(2026, 6, 29), date(2026, 7, 3)),
+            (8, "2026-07-13", date(2026, 7, 13), date(2026, 7, 17)),
+        ],
+    )
+    def test_fixture_provider_meal_id_stable_across_weeks(
+        self, offer_id: int, fixture_date: str, week_start: date, week_end: date
+    ) -> None:
+        menu = normalize_ntfy_week(
+            raw_days=[_load_fixture_raw_day(fixture_date, offer_id)],
+            provider_id="ntfy",
+            week_start=week_start,
+            week_end=week_end,
+            user_id="example",
+            purchased_meals=[PurchasedMeal(type="dinner", size="M")],
+        )
+
+        dinner = menu.days[0].meals[0]
+        kofty = next(v for v in dinner.variants if v.name.startswith("Kofty z miętą"))
+        assert kofty.provider_meal_id == "496"

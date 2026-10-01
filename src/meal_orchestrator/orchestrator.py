@@ -14,8 +14,14 @@ from meal_orchestrator.artifacts import ArtifactStore
 from meal_orchestrator.batch_coordinator import BatchCoordinator, build_run_metadata
 from meal_orchestrator.batch_runner import PendingBatchState
 from meal_orchestrator.config import AUTO_ROUTER_MODEL, AppConfig, UserConfig
-from meal_orchestrator.delivery import DiscordClient, EmailClient, build_discord_client
+from meal_orchestrator.delivery import (
+    DiscordClient,
+    EmailClient,
+    MoWebClient,
+    build_discord_client,
+)
 from meal_orchestrator.delivery.email import ResendEmailClient
+from meal_orchestrator.delivery.mo_web import MoWebHttpClient
 from meal_orchestrator.domain import (
     RunContext,
     WorkflowResult,
@@ -58,6 +64,7 @@ class _RunClients(NamedTuple):
     discord_client: DiscordClient
     provider_factory: Callable[[str], ProviderAdapter]
     artifact_store: ArtifactStore
+    mo_web_client: MoWebClient | None
 
 
 class RunOrchestrator:
@@ -239,6 +246,24 @@ class RunOrchestrator:
             discord_client=discord_client,
             provider_factory=provider_factory,
             artifact_store=artifact_store,
+            mo_web_client=self._build_mo_web_client(run_id),
+        )
+
+    def _build_mo_web_client(self, run_id: str) -> MoWebClient | None:
+        config = self.app_config.delivery.mo_web
+        if config is None:
+            return None
+        token = os.environ.get(config.token_env)
+        if not token:
+            logger.warning(
+                "mo-web delivery disabled for this run: env var %s is not set (url=%s)",
+                config.token_env,
+                config.url,
+                extra={"run_id": run_id, "step": "mo_web"},
+            )
+            return None
+        return MoWebHttpClient(
+            url=config.url, token=token, timeout_seconds=config.timeout_seconds
         )
 
     def _fetch_menus_sequentially(
@@ -281,6 +306,7 @@ class RunOrchestrator:
                     discord_client=clients.discord_client,
                     project_root=self.project_root,
                     artifact_store=clients.artifact_store,
+                    mo_web_client=clients.mo_web_client,
                 )
                 outcome = executor.fetch_menu(user, run_context)
             except Exception as exc:

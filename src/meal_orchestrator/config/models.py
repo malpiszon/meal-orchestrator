@@ -49,9 +49,17 @@ class LlmConfig:
 
 
 @dataclass(frozen=True)
+class MoWebDeliveryConfig:
+    url: str
+    token_env: str
+    timeout_seconds: int = 10
+
+
+@dataclass(frozen=True)
 class DeliveryConfig:
     email_from: str
     operational_discord_webhook_env: str | None
+    mo_web: MoWebDeliveryConfig | None = None
 
 
 @dataclass(frozen=True)
