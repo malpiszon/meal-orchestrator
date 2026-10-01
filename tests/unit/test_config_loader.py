@@ -11,8 +11,8 @@ def test_load_example_config_files() -> None:
 
     assert app.runtime.timezone == "Europe/Warsaw"
     assert app.runtime.max_concurrent_users == 5
-    assert app.llm.model == "openai/gpt-5-mini"
-    assert app.llm.dry_run_model == "google/gemini-2.5-flash-lite"
+    assert app.llm.model == "openai/gpt-6-luna"
+    assert app.llm.dry_run_model == "deepseek/deepseek-v4-flash"
     assert app.artifacts is not None
     assert app.artifacts.retention_days == 14
     assert app.artifacts.max_runs == 10
