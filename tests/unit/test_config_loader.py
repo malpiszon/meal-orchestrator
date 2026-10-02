@@ -650,6 +650,28 @@ def test_auto_router_config_rejects_non_list_allowed_models(tmp_path) -> None:
         load_app_config(path)
 
 
+def test_reasoning_effort_defaults_to_none_when_absent(tmp_path) -> None:
+    path = tmp_path / "app.yaml"
+    path.write_text(_base_app_yaml(), encoding="utf-8")
+
+    assert load_app_config(path).llm.reasoning_effort is None
+
+
+def test_reasoning_effort_loaded_when_present(tmp_path) -> None:
+    path = tmp_path / "app.yaml"
+    path.write_text(_base_app_yaml("  reasoning_effort: medium\n"), encoding="utf-8")
+
+    assert load_app_config(path).llm.reasoning_effort == "medium"
+
+
+def test_reasoning_effort_rejects_unknown_value(tmp_path) -> None:
+    path = tmp_path / "app.yaml"
+    path.write_text(_base_app_yaml("  reasoning_effort: extreme\n"), encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="reasoning_effort"):
+        load_app_config(path)
+
+
 def test_batch_config_rejects_auto_router_model(tmp_path) -> None:
     path = tmp_path / "app.yaml"
     path.write_text(

@@ -9,6 +9,7 @@ import yaml
 from meal_orchestrator.config.models import (
     AUTO_ROUTER_COST_TIERS,
     AUTO_ROUTER_MODEL,
+    REASONING_EFFORTS,
     AppConfig,
     ArtifactConfig,
     AutoRouterConfig,
@@ -53,6 +54,7 @@ def load_app_config(path: Path) -> AppConfig:
             fallback_models=fallback_models,
             batch=batch,
             auto_router=_parse_auto_router(_optional(data, "llm", "auto_router")),
+            reasoning_effort=_parse_reasoning_effort(_optional(data, "llm", "reasoning_effort")),
         ),
         default_provider=_required(data, "providers", "default"),
         delivery=DeliveryConfig(
@@ -92,6 +94,12 @@ def _parse_auto_router(raw: Any) -> AutoRouterConfig:
     ):
         raise ConfigError("llm.auto_router.allowed_models must be a list of strings")
     return AutoRouterConfig(cost_tier=cost_tier, allowed_models=allowed_models)
+
+
+def _parse_reasoning_effort(raw: Any) -> str | None:
+    if raw is not None and raw not in REASONING_EFFORTS:
+        raise ConfigError(f"llm.reasoning_effort must be one of: {', '.join(REASONING_EFFORTS)}")
+    return raw
 
 
 def _parse_max_concurrent_users(raw: Any) -> int:

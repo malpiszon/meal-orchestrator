@@ -311,7 +311,12 @@ class BatchCoordinator:
         for candidate in candidates:
             rows = self._build_rows(pending, run_id, candidate)
             try:
-                return rows, submit_batch(rows, api_key=api_key), candidate
+                batch_id = submit_batch(
+                    rows,
+                    api_key=api_key,
+                    reasoning_effort=self.app_config.llm.reasoning_effort,
+                )
+                return rows, batch_id, candidate
             except urllib.error.HTTPError as exc:
                 if exc.code not in (400, 404):
                     raise

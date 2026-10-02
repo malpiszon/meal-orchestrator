@@ -26,6 +26,7 @@ class BatchConfig:
 # has no `:batch` endpoint and can't be used with batch mode.
 AUTO_ROUTER_MODEL = "openrouter/auto"
 AUTO_ROUTER_COST_TIERS = ("low", "medium", "high", "xhigh", "max")
+REASONING_EFFORTS = ("minimal", "low", "medium", "high")
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,7 @@ class LlmConfig:
     fallback_models: list[str] = field(default_factory=list)
     batch: BatchConfig = field(default_factory=BatchConfig)
     auto_router: AutoRouterConfig = field(default_factory=AutoRouterConfig)
+    reasoning_effort: str | None = None
 
 
 @dataclass(frozen=True)

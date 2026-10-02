@@ -1042,6 +1042,14 @@ def test_build_request_body_omits_plugin_for_concrete_model() -> None:
     assert "plugins" not in body
 
 
+def test_build_request_body_sets_reasoning_effort_only_when_configured() -> None:
+    payload = _make_request().payload
+
+    assert "reasoning" not in build_request_body("openai/gpt-4o-mini", payload)
+    body = build_request_body("openai/gpt-4o-mini", payload, reasoning_effort="high")
+    assert body["reasoning"] == {"effort": "high"}
+
+
 def test_generate_sends_auto_router_plugin_only_to_auto_model() -> None:
     bodies = []
 

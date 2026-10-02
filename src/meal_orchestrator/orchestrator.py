@@ -233,6 +233,7 @@ class RunOrchestrator:
         llm_client = self.llm_client_override or OpenRouterClient(
             max_retries=self.app_config.llm.max_retries,
             auto_router=self.app_config.llm.auto_router,
+            reasoning_effort=self.app_config.llm.reasoning_effort,
         )
         provider_factory = self.provider_factory_override or build_provider_adapter
         artifact_store = ArtifactStore(self.app_config.artifacts)

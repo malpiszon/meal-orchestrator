@@ -65,7 +65,11 @@ class BatchRowError:
 
 
 def submit_batch(
-    rows: list[BatchRequestRow], *, api_key: str | None = None, timeout_seconds: int = 60
+    rows: list[BatchRequestRow],
+    *,
+    api_key: str | None = None,
+    timeout_seconds: int = 60,
+    reasoning_effort: str | None = None,
 ) -> str:
     """Submit one batch containing every row and return the OpenRouter batch id."""
     if not rows:
@@ -75,7 +79,12 @@ def submit_batch(
             "endpoint": "/v1/chat/completions",
             "model": rows[0].model,
             "requests": [
-                {"custom_id": row.custom_id, "body": build_request_body(row.model, row.payload)}
+                {
+                    "custom_id": row.custom_id,
+                    "body": build_request_body(
+                        row.model, row.payload, reasoning_effort=reasoning_effort
+                    ),
+                }
                 for row in rows
             ],
         }

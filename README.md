@@ -66,7 +66,12 @@ instead of treating it as an error.
   (OpenRouter's Auto Router), tuned via the optional `llm.auto_router`
   block (see `config/app.example.yaml`); it has no batch endpoint, so in
   batch mode the batch is submitted with `llm.fallback_models` (then
-  required) while synchronous calls still start from the Auto Router.
+  required) while synchronous calls still start from the Auto Router. An
+  optional `llm.reasoning_effort` is sent to every model as OpenRouter's
+  `reasoning.effort`; when omitted, the model's default applies. Since
+  requests set `provider.require_parameters`, setting it restricts routing
+  (including fallbacks, batch candidates and the Auto Router) to
+  models/providers that support reasoning; others fail with a 404.
 - Email delivery via Resend, Discord notifications via webhooks (per-user and
   operational), both optional and independently configurable.
 - `--dry-run` mode that runs the full pipeline (including the LLM call)
