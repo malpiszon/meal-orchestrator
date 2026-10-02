@@ -16,6 +16,8 @@ llm:
     - "deepseek/deepseek-v4.1-flash"
   # Optional reasoning effort: minimal | low | medium | high. Omit to use the
   # model's default. Higher effort adds reasoning tokens (cost and latency).
+  # Requests require providers to support every parameter, so when set, every
+  # configured model (incl. fallbacks) must support reasoning or its requests fail.
   # reasoning_effort: "medium"
   # model/dry_run_model may be "openrouter/auto" (OpenRouter's Auto Router).
   # It has no batch endpoint: with batch enabled, the batch is submitted with
