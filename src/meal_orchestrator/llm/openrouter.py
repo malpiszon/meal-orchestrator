@@ -54,10 +54,12 @@ class OpenRouterClient:
         api_key: str | None = None,
         max_retries: int = 3,
         auto_router: AutoRouterConfig | None = None,
+        reasoning_effort: str | None = None,
     ) -> None:
         self._api_key = api_key if api_key is not None else os.environ["OPENROUTER_API_KEY"]
         self._max_retries = max_retries
         self._auto_router = auto_router
+        self._reasoning_effort = reasoning_effort
 
     @property
     def api_key(self) -> str:
@@ -84,7 +86,11 @@ class OpenRouterClient:
             attempt += 1
             body = json.dumps(
                 build_request_body(
-                    model, request.payload, feedback, auto_router=self._auto_router
+                    model,
+                    request.payload,
+                    feedback,
+                    auto_router=self._auto_router,
+                    reasoning_effort=self._reasoning_effort,
                 )
             ).encode("utf-8")
             try:

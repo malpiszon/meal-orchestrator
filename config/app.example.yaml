@@ -14,6 +14,9 @@ llm:
   fallback_models:
     - "google/gemini-3.5-flash-lite"
     - "deepseek/deepseek-v4.1-flash"
+  # Optional reasoning effort: minimal | low | medium | high. Omit to use the
+  # model's default. Higher effort adds reasoning tokens (cost and latency).
+  # reasoning_effort: "medium"
   # model/dry_run_model may be "openrouter/auto" (OpenRouter's Auto Router).
   # It has no batch endpoint: with batch enabled, the batch is submitted with
   # fallback_models (then required) and synchronous calls still start from

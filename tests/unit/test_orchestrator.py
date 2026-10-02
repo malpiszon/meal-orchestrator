@@ -503,6 +503,7 @@ def test_orchestrator_wires_configured_max_retries_into_llm_client(monkeypatch, 
     assert captured_kwargs == {
         "max_retries": app_config().llm.max_retries,
         "auto_router": app_config().llm.auto_router,
+        "reasoning_effort": app_config().llm.reasoning_effort,
     }
 
 

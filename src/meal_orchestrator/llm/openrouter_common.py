@@ -151,6 +151,7 @@ def build_request_body(
     feedback: str | None = None,
     *,
     auto_router: AutoRouterConfig | None = None,
+    reasoning_effort: str | None = None,
 ) -> dict[str, Any]:
     """Build the chat-completion request body for one model call.
 
@@ -168,6 +169,8 @@ def build_request_body(
         # the usage block only carries token counts, not cost.
         "usage": {"include": True},
     }
+    if reasoning_effort is not None:
+        body["reasoning"] = {"effort": reasoning_effort}
     if model == AUTO_ROUTER_MODEL and auto_router is not None:
         plugin = _auto_router_plugin(auto_router)
         if plugin is not None:
