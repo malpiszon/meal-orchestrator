@@ -226,8 +226,8 @@ def test_poll_until_terminal_logs_when_next_check_happens(caplog) -> None:
     (record,) = caplog.records
     assert record.batch_id == "batch-1"
     assert record.next_check_in_seconds == 600
-    assert "in 600s at " in record.getMessage()
-    assert record.next_check_at == record.getMessage().rsplit(" at ", 1)[1]
+    assert record.getMessage() == "next batch status check scheduled"
+    assert record.next_check_at.endswith("+00:00")
 
 
 def test_poll_until_terminal_survives_a_transient_error_and_keeps_polling() -> None:

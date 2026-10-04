@@ -236,10 +236,7 @@ def poll_until_terminal(
         next_check_at = datetime.fromtimestamp(time.time() + wait, UTC)
         next_check_at = next_check_at.isoformat(timespec="seconds")
         logger.info(
-            "next batch status check: batch_id=%s in %ds at %s",
-            batch_id,
-            round(wait),
-            next_check_at,
+            "next batch status check scheduled",
             extra={
                 "batch_id": batch_id,
                 "next_check_in_seconds": round(wait),
