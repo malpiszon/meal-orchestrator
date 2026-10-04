@@ -26,10 +26,11 @@ For each configured user, per run:
 4. Send the prompt to an LLM through OpenRouter, requesting a structured
    assessment (score + justifications for every meal variant), retrying with
    feedback if the response is malformed or incomplete.
-5. Render the assessment as plain text and email it, and post a Discord
-   notification.
+5. Render the assessment as plain text and email it.
 6. Optionally deliver the week (menu + every variant's score) to the mo-web
    dashboard, best-effort (`delivery.mo_web`, see `delivery/mo_web.py`).
+7. Post a Discord notification pointing to the email, plus a link to the
+   mo-web dashboard when step 6 succeeded.
 
 A run fetches every user's menu (step 1) sequentially, one at a time — this
 is deliberate, so a growing number of users never sends concurrent requests

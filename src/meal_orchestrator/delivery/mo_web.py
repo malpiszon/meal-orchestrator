@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from typing import Any
+from urllib.parse import urlsplit
 
 from meal_orchestrator import USER_AGENT
 from meal_orchestrator.domain import CanonicalMenu, WeekAssessment
@@ -71,6 +72,9 @@ class MoWebHttpClient:
         max_retries: int = 3,
     ) -> None:
         self._url = url
+        # mo-web serves the user's plans on /dashboard, on the same origin as the API.
+        parts = urlsplit(url)
+        self.dashboard_url = f"{parts.scheme}://{parts.netloc}/dashboard"
         self._token = token
         self._timeout_seconds = timeout_seconds
         self._max_retries = max_retries

@@ -773,6 +773,8 @@ def test_execute_from_llm_result_reports_correct_failed_step_on_save_error(tmp_p
 
 
 class FakeMoWebClient:
+    dashboard_url = "https://mo.example.com/dashboard"
+
     def __init__(self, error: Exception | None = None) -> None:
         self.payloads: list[dict] = []
         self.error = error
@@ -802,6 +804,45 @@ def test_mo_web_receives_payload_after_email(tmp_path) -> None:
     assert len(mo_web.payloads) == 1
     assert mo_web.payloads[0]["run_id"] == "run-1"
     assert mo_web.payloads[0]["user"] == {"email": "user@example.com"}
+
+
+def test_plan_ready_message_links_mo_web_when_delivered(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DISCORD_USER_WEBHOOK_URL", "https://example.com/user")
+    discord = FakeDiscordClient()
+
+    _executor(
+        tmp_path,
+        FakeProvider(),
+        FakeLlmClient(),
+        FakeEmailClient(),
+        discord,
+        mo_web=FakeMoWebClient(),
+    ).execute(_mo_web_user(tmp_path), _context(dry_run=False))
+
+    [message] = [m for m in discord.messages if m.title == "Meal plan ready"]
+    assert message.description.endswith(
+        "is ready. Check it in your email or at "
+        "https://mo.example.com/dashboard"
+    )
+
+
+def test_plan_ready_message_omits_mo_web_link_when_delivery_failed(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("DISCORD_USER_WEBHOOK_URL", "https://example.com/user")
+    discord = FakeDiscordClient()
+
+    _executor(
+        tmp_path,
+        FakeProvider(),
+        FakeLlmClient(),
+        FakeEmailClient(),
+        discord,
+        mo_web=FakeMoWebClient(RuntimeError("connection refused")),
+    ).execute(_mo_web_user(tmp_path), _context(dry_run=False))
+
+    [message] = [m for m in discord.messages if m.title == "Meal plan ready"]
+    assert message.description.endswith("is ready. Check it in your email.")
 
 
 def test_mo_web_skipped_on_dry_run(tmp_path) -> None:

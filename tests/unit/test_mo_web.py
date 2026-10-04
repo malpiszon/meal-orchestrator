@@ -140,6 +140,11 @@ def _http_error(code: int, body: dict | None = None) -> urllib.error.HTTPError:
 
 
 class TestMoWebHttpClient:
+    def test_dashboard_url_is_on_the_api_origin(self) -> None:
+        client = MoWebHttpClient(url="https://mo.example.com/api/mo/deliveries", token=_TOKEN)
+
+        assert client.dashboard_url == "https://mo.example.com/dashboard"
+
     def test_sends_payload_with_bearer_token(self) -> None:
         with patch(
             "meal_orchestrator.delivery.mo_web.post_json",
