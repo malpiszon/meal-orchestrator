@@ -182,7 +182,7 @@ def test_poll_until_terminal_backs_off_then_completes() -> None:
     assert sleeps == [1, 2]
 
 
-def test_poll_until_terminal_does_not_log_successful_checks(caplog) -> None:
+def test_poll_until_terminal_does_not_log_check_responses(caplog) -> None:
     """poll_until_terminal stays generic and quiet on success — a completed
     batch's `data` can be arbitrarily large (e.g. full per-row LLM output),
     so logging it here (rather than leaving that to a caller that knows the
@@ -204,7 +204,30 @@ def test_poll_until_terminal_does_not_log_successful_checks(caplog) -> None:
         )
 
     assert result == {"status": "completed"}
-    assert caplog.records == []
+    # Only the next-check schedule line, never the response itself.
+    assert [r.step for r in caplog.records] == ["batch_wait"]
+
+
+def test_poll_until_terminal_logs_when_next_check_happens(caplog) -> None:
+    import logging
+
+    config = BatchConfig(initial_poll_interval_seconds=600, max_poll_interval_seconds=3600)
+    statuses = iter(["in_progress", "completed"])
+
+    with caplog.at_level(logging.INFO):
+        poll_until_terminal(
+            "batch-1",
+            config,
+            get_batch=lambda batch_id: {"status": next(statuses)},
+            is_pending=lambda data: data["status"] != "completed",
+            sleep=lambda seconds: None,
+        )
+
+    (record,) = caplog.records
+    assert record.batch_id == "batch-1"
+    assert record.next_check_in_seconds == 600
+    assert "in 600s at " in record.getMessage()
+    assert record.next_check_at == record.getMessage().rsplit(" at ", 1)[1]
 
 
 def test_poll_until_terminal_survives_a_transient_error_and_keeps_polling() -> None:

@@ -201,8 +201,9 @@ def poll_until_terminal(
     are still bounded by `max_wait_hours`, which lets the caller's existing
     timeout-fallback path take over.
 
-    This function stays deliberately quiet about what a successful check
-    actually returned — `data`'s shape (and how big it is, e.g. a completed
+    Before each wait it logs when the next check will happen (a long backoff
+    otherwise looks like a hang), but stays deliberately quiet about what a
+    successful check actually returned — `data`'s shape (and how big it is, e.g. a completed
     batch's full row-by-row LLM output) is entirely up to `get_batch`, so
     logging it here would either need OpenRouter-specific knowledge this
     generic poll loop shouldn't have, or dump arbitrarily large payloads to
@@ -231,5 +232,20 @@ def poll_until_terminal(
                 return data
         if time.time() >= deadline:
             return None
-        sleep(min(interval, max(0.0, deadline - time.time())))
+        wait = min(interval, max(0.0, deadline - time.time()))
+        next_check_at = datetime.fromtimestamp(time.time() + wait, UTC)
+        next_check_at = next_check_at.isoformat(timespec="seconds")
+        logger.info(
+            "next batch status check: batch_id=%s in %ds at %s",
+            batch_id,
+            round(wait),
+            next_check_at,
+            extra={
+                "batch_id": batch_id,
+                "next_check_in_seconds": round(wait),
+                "next_check_at": next_check_at,
+                "step": "batch_wait",
+            },
+        )
+        sleep(wait)
         interval = min(interval * 2, config.max_poll_interval_seconds)
