@@ -454,10 +454,7 @@ class BatchCoordinator:
             # artifact below once polling ends, not logged to stdout.
             data = get_batch(bid, api_key=api_key)
             logger.info(
-                "batch status check: batch_id=%s status=%s request_counts=%s",
-                bid,
-                data.get("status"),
-                data.get("request_counts"),
+                "batch status check",
                 extra={
                     "run_id": run_id,
                     "batch_id": bid,
