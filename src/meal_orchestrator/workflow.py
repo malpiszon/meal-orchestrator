@@ -286,11 +286,13 @@ class UserWorkflowExecutor:
             state.failed_step = "email"
             self._deliver_email(user, run_context, menu, llm_result, log_context)
 
-            state.failed_step = "discord"
-            self._notify_plan_ready(user, run_context, log_context)
-
             # Best effort and never raises, so it leaves failed_step alone.
-            self._deliver_to_mo_web(user, run_context, menu, llm_result, artifacts, log_context)
+            mo_web_delivered = self._deliver_to_mo_web(
+                user, run_context, menu, llm_result, artifacts, log_context
+            )
+
+            state.failed_step = "discord"
+            self._notify_plan_ready(user, run_context, mo_web_delivered, log_context)
 
             logger.info("user workflow completed", extra={**log_context, "step": "complete"})
             state.status = WorkflowStatus.COMPLETED
@@ -343,11 +345,13 @@ class UserWorkflowExecutor:
             state.failed_step = "email"
             self._deliver_email(user, run_context, menu, llm_result, log_context)
 
-            state.failed_step = "discord"
-            self._notify_plan_ready(user, run_context, log_context)
-
             # Best effort and never raises, so it leaves failed_step alone.
-            self._deliver_to_mo_web(user, run_context, menu, llm_result, artifacts, log_context)
+            mo_web_delivered = self._deliver_to_mo_web(
+                user, run_context, menu, llm_result, artifacts, log_context
+            )
+
+            state.failed_step = "discord"
+            self._notify_plan_ready(user, run_context, mo_web_delivered, log_context)
 
             logger.info("user workflow completed", extra={**log_context, "step": "complete"})
             state.status = WorkflowStatus.COMPLETED
@@ -500,7 +504,11 @@ class UserWorkflowExecutor:
             raise
 
     def _notify_plan_ready(
-        self, user: UserConfig, run_context: RunContext, log_context: dict
+        self,
+        user: UserConfig,
+        run_context: RunContext,
+        mo_web_delivered: bool,
+        log_context: dict,
     ) -> None:
         if not _discord_enabled(run_context, user):
             logger.info(
@@ -512,6 +520,13 @@ class UserWorkflowExecutor:
                 },
             )
             return
+        where = "Check it in your email."
+        if mo_web_delivered and self.mo_web_client is not None:
+            # No trailing period: Discord could take it as part of the URL.
+            where = (
+                "Check it in your email or at "
+                f"{self.mo_web_client.dashboard_url}"
+            )
         try:
             self.discord_client.notify(
                 DiscordMessage(
@@ -520,7 +535,7 @@ class UserWorkflowExecutor:
                     description=(
                         f"Hey <@{user.discord_user_id}>, your meal plan for "
                         f"{format_date_range(run_context.week_start, run_context.week_end)} "
-                        "is ready."
+                        f"is ready. {where}"
                     ),
                     color=COLOR_SUCCESS,
                 )
@@ -541,10 +556,11 @@ class UserWorkflowExecutor:
         llm_result: LlmResult,
         artifacts: RunArtifacts,
         log_context: dict,
-    ) -> None:
+    ) -> bool:
+        """Return whether the week reached mo-web, so the Discord message links to it."""
         if run_context.dry_run or self.mo_web_client is None:
             logger.info("mo-web delivery skipped", extra={**log_context, "step": "mo_web"})
-            return
+            return False
         try:
             payload = build_mo_web_payload(
                 menu, llm_result.structured, user.email, run_context.run_id
@@ -572,6 +588,8 @@ class UserWorkflowExecutor:
                 week_start=run_context.week_start,
                 error=exc,
             )
+            return False
+        return True
 
     def _notify_menu_unavailable(
         self, user: UserConfig, run_context: RunContext, log_context: dict

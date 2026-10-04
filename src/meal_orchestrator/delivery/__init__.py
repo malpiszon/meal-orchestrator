@@ -15,6 +15,8 @@ class DiscordClient(Protocol):
 
 
 class MoWebClient(Protocol):
+    dashboard_url: str
+
     def send(self, payload: dict[str, Any]) -> None: ...
 
 
