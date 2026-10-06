@@ -187,6 +187,18 @@ class TestMoWebHttpClient:
 
         assert post.call_count == 1
 
+    def test_does_not_retry_conflict(self) -> None:
+        with (
+            patch(
+                "meal_orchestrator.delivery.mo_web.post_json",
+                side_effect=_http_error(409, {"error": "conflict"}),
+            ) as post,
+            pytest.raises(urllib.error.HTTPError),
+        ):
+            MoWebHttpClient(url=_URL, token=_TOKEN).send({})
+
+        assert post.call_count == 1
+
 
 class TestMoWebFailureDescription:
     def test_includes_status_error_and_issues(self) -> None:
