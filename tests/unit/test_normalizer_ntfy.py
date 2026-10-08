@@ -49,6 +49,7 @@ _PRODUCT_BREAKFAST_M = {
     "name": "Owsianka",
     "size_tag": {"value": "M"},
     "composition": "płatki owsiane, mleko",
+    "weight": 250,
     "protein": 10.0,
     "fat": 5.0,
     "saturated_fat": 1.5,
@@ -64,6 +65,7 @@ _PRODUCT_LUNCH_XL = {
     "name": "Kurczak z ryżem",
     "size_tag": {"value": "XL"},
     "composition": "kurczak, ryż, warzywa",
+    "weight": 500,
     "protein": 50.0,
     "fat": 20.0,
     "saturated_fat": 3.0,
@@ -112,6 +114,7 @@ def _filler_dishes(
                 "name": f"Filler dish {pid}",
                 "size_tag": {"value": size},
                 "composition": "filler",
+                "weight": 200,
                 "protein": 1.0,
             }
         )
@@ -432,7 +435,8 @@ class TestNormalizeVariants:
         )
 
         variants = menu.to_compact_dict()["days"][0]["meals"][0]["variants"]
-        nutrition = next(v for v in variants if v["name"] == "Owsianka")["nutrition"]
+        variant = next(v for v in variants if v["name"] == "Owsianka")
+        nutrition = variant["nutrition"]
         assert nutrition["protein_g"] == 10.0
         assert nutrition["fat_g"] == 5.0
         assert nutrition["saturated_fat_g"] == 1.5
@@ -440,6 +444,7 @@ class TestNormalizeVariants:
         assert nutrition["sugar_g"] == 8.0
         assert nutrition["fiber_g"] == 3.0
         assert nutrition["salt_g"] == 0.1
+        assert variant["nutrition_per_100g"] == {"salt_g": 0.04}
 
     def test_composition_whitespace_normalized(self) -> None:
         product = {**_PRODUCT_BREAKFAST_M, "composition": "  płatki  owsiane,\tmleko  "}
@@ -478,6 +483,7 @@ class TestNormalizeVariants:
             "name": "Owsianka",
             "size_tag": {"value": "M"},
             "composition": "owsianka",
+            "weight": 250,
             "protein": 10.0,
         }
         filler_products, filler_results = _filler_dishes(mt_id=1, size="M", count=2, id_start=951)
@@ -506,9 +512,52 @@ class TestNormalizeVariants:
         )
 
         variants = menu.to_compact_dict()["days"][0]["meals"][0]["variants"]
-        nutrition = next(v for v in variants if v["name"] == "Owsianka")["nutrition"]
-        assert "protein_g" in nutrition
-        assert "fat_g" not in nutrition
+        variant = next(v for v in variants if v["name"] == "Owsianka")
+        assert "protein_g" in variant["nutrition"]
+        assert "fat_g" not in variant["nutrition"]
+        assert "nutrition_per_100g" not in variant
+
+    @pytest.mark.parametrize(
+        "weight", ["missing", None, 0, -250, float("nan"), float("inf"), "250", True]
+    )
+    def test_unusable_weight_skips_salt_per_100g(self, weight) -> None:
+        product = {**_PRODUCT_BREAKFAST_M, "weight": weight}
+        if weight == "missing":
+            del product["weight"]
+        menu = self._normalize_with_breakfast(product, id_start=961)
+
+        variants = menu.to_compact_dict()["days"][0]["meals"][0]["variants"]
+        variant = next(v for v in variants if v["name"] == "Owsianka")
+        assert variant["nutrition"]["salt_g"] == 0.1
+        assert "nutrition_per_100g" not in variant
+
+    @staticmethod
+    def _normalize_with_breakfast(product: dict, *, id_start: int):
+        filler_products, filler_results = _filler_dishes(
+            mt_id=1, size="M", count=2, id_start=id_start
+        )
+        includes = {
+            "diet_variant_meal_types": [_MEAL_TYPE_BREAKFAST],
+            "simple_products": [product, *filler_products],
+        }
+        results = [
+            {
+                "diet_variant_meal_type_id": 1,
+                "simple_product_id": 10,
+                "diet_variant_id": 1,
+                "configurable_product_id": 100,
+            },
+            *filler_results,
+        ]
+        return normalize_ntfy_week(
+            raw_days=[_make_raw_day(results=results, includes=includes)],
+            provider_id="ntfy",
+            week_start=_WEEK_START,
+            week_end=_WEEK_END,
+            user_id="example",
+            purchased_meals=[PurchasedMeal(type="breakfast", size="M")],
+            expected_variants_per_meal=_expected_variants_per_meal,
+        )
 
 
 class TestNormalizeDayFiltering:

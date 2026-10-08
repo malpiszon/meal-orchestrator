@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import date
 from enum import StrEnum
@@ -56,6 +57,9 @@ class MealVariant:
     # to_compact_dict() so the LLM prompt is unchanged; mo-web keys on it.
     provider_meal_id: str
     nutrition: Nutrition = field(default_factory=Nutrition)
+    # Portion weight, used only to derive salt per 100 g for the LLM prompt
+    # (so salty but small portions can be flagged too).
+    weight_g: float | None = None
 
     def to_compact_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -65,6 +69,15 @@ class MealVariant:
         nutrition = self.nutrition.to_compact_dict()
         if nutrition:
             payload["nutrition"] = nutrition
+        if (
+            self.nutrition.salt_g is not None
+            and self.weight_g is not None
+            and math.isfinite(self.weight_g)
+            and self.weight_g > 0
+        ):
+            payload["nutrition_per_100g"] = {
+                "salt_g": round(self.nutrition.salt_g * 100 / self.weight_g, 2)
+            }
         return payload
 
 

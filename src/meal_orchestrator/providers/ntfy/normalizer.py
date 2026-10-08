@@ -188,6 +188,7 @@ def _to_meal_variant(product: dict[str, Any], provider_meal_id: str) -> MealVari
         name=name,
         composition=composition,
         provider_meal_id=provider_meal_id,
+        weight_g=_weight_or_none(product),
         nutrition=Nutrition(
             protein_g=_float_or_none(product, "protein"),
             fat_g=_float_or_none(product, "fat"),
@@ -198,6 +199,15 @@ def _to_meal_variant(product: dict[str, Any], provider_meal_id: str) -> MealVari
             salt_g=_float_or_none(product, "salt"),
         ),
     )
+
+
+def _weight_or_none(product: dict[str, Any]) -> float | None:
+    # Weight only feeds the optional salt-per-100 g value, so an unusable one
+    # just leaves that out rather than failing the week.
+    weight = product.get("weight")
+    if isinstance(weight, bool) or not isinstance(weight, (int, float)):
+        return None
+    return float(weight)
 
 
 def _float_or_none(product: dict[str, Any], key: str) -> float | None:
