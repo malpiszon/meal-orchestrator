@@ -184,10 +184,17 @@ def _to_meal_variant(product: dict[str, Any], provider_meal_id: str) -> MealVari
 
     composition = _normalize_whitespace(product.get("composition") or "")
 
+    weight = product.get("weight")
+    if not isinstance(weight, (int, float)) or weight <= 0:
+        raise ValueError(
+            f"ntfy: product id={product.get('id')} has no valid weight: {weight!r}"
+        )
+
     return MealVariant(
         name=name,
         composition=composition,
         provider_meal_id=provider_meal_id,
+        weight_g=float(weight),
         nutrition=Nutrition(
             protein_g=_float_or_none(product, "protein"),
             fat_g=_float_or_none(product, "fat"),

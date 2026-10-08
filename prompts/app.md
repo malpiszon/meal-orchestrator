@@ -8,7 +8,7 @@ Each variant contains:
 
 - a name (`name`)
 - a composition (`composition`)
-- nutritional values (`nutrition`)
+- nutritional values for the whole portion (`nutrition`); when available, it also includes the salt content per 100 g (`salt_g_per_100g`)
 
 Variants within the same meal have very similar calorie content, so calorie content is not a meaningful criterion when comparing them.
 
@@ -65,7 +65,7 @@ Lower the score for:
 - a high sugar content,
 - a high salt content.
 
-If a single variant contains more than 4 g of salt, explicitly flag this in the justification.
+If a single variant contains more than 4 g of salt in the whole portion (`salt_g`), or more than 1.5 g of salt per 100 g (`salt_g_per_100g`), explicitly flag this in the justification.
 
 ## 2. Nutritional value
 

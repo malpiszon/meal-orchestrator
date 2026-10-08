@@ -56,6 +56,9 @@ class MealVariant:
     # to_compact_dict() so the LLM prompt is unchanged; mo-web keys on it.
     provider_meal_id: str
     nutrition: Nutrition = field(default_factory=Nutrition)
+    # Portion weight, used only to derive salt per 100 g for the LLM prompt
+    # (so salty but small portions can be flagged too).
+    weight_g: float | None = None
 
     def to_compact_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -63,6 +66,8 @@ class MealVariant:
             "composition": self.composition,
         }
         nutrition = self.nutrition.to_compact_dict()
+        if self.nutrition.salt_g is not None and self.weight_g:
+            nutrition["salt_g_per_100g"] = round(self.nutrition.salt_g * 100 / self.weight_g, 2)
         if nutrition:
             payload["nutrition"] = nutrition
         return payload

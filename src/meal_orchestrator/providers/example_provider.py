@@ -118,6 +118,7 @@ def _normalize_variant(raw_variant: dict[str, Any]) -> MealVariant:
         nutrition=Nutrition(
             **{field: nutrition[field] for field in NUTRITION_FIELDS if field in nutrition}
         ),
+        weight_g=float(raw_variant["weight_g"]) if "weight_g" in raw_variant else None,
     )
 
 
@@ -153,6 +154,7 @@ def _placeholder_day(day: date) -> dict:
                             "id": "1",
                             "name": "Tortilla",
                             "composition": "Chicken, vegetables, tortilla, yogurt sauce",
+                            "weight_g": 300,
                             "nutrition": {
                                 "protein_g": 28,
                                 "fat_g": 18,
@@ -174,6 +176,7 @@ def _placeholder_day(day: date) -> dict:
                             "id": "2",
                             "name": "Rice bowl",
                             "composition": "Rice, turkey, broccoli, sesame sauce",
+                            "weight_g": 450,
                             "nutrition": {
                                 "protein_g": 42,
                                 "fat_g": 20,
