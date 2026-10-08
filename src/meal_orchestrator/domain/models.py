@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import date
 from enum import StrEnum
@@ -66,7 +67,12 @@ class MealVariant:
             "composition": self.composition,
         }
         nutrition = self.nutrition.to_compact_dict()
-        if self.nutrition.salt_g is not None and self.weight_g:
+        if (
+            self.nutrition.salt_g is not None
+            and self.weight_g is not None
+            and math.isfinite(self.weight_g)
+            and self.weight_g > 0
+        ):
             nutrition["salt_g_per_100g"] = round(self.nutrition.salt_g * 100 / self.weight_g, 2)
         if nutrition:
             payload["nutrition"] = nutrition

@@ -184,17 +184,11 @@ def _to_meal_variant(product: dict[str, Any], provider_meal_id: str) -> MealVari
 
     composition = _normalize_whitespace(product.get("composition") or "")
 
-    weight = product.get("weight")
-    if not isinstance(weight, (int, float)) or weight <= 0:
-        raise ValueError(
-            f"ntfy: product id={product.get('id')} has no valid weight: {weight!r}"
-        )
-
     return MealVariant(
         name=name,
         composition=composition,
         provider_meal_id=provider_meal_id,
-        weight_g=float(weight),
+        weight_g=_float_or_none(product, "weight"),
         nutrition=Nutrition(
             protein_g=_float_or_none(product, "protein"),
             fat_g=_float_or_none(product, "fat"),
@@ -211,9 +205,9 @@ def _float_or_none(product: dict[str, Any], key: str) -> float | None:
     value = product.get(key)
     if value is None:
         return None
-    if not isinstance(value, (int, float)):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(
-            f"ntfy: expected numeric nutrition value, got "
+            f"ntfy: expected numeric {key!r} value, got "
             f"{type(value).__name__}: {value!r}"
         )
     return float(value)

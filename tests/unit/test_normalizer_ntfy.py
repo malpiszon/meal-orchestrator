@@ -516,10 +516,32 @@ class TestNormalizeVariants:
         assert "fat_g" not in nutrition
         assert "salt_g_per_100g" not in nutrition
 
-    @pytest.mark.parametrize("weight", [None, 0, "250"])
-    def test_invalid_weight_raises(self, weight) -> None:
+    @pytest.mark.parametrize(
+        "weight", ["missing", None, 0, -250, float("nan"), float("inf")]
+    )
+    def test_unusable_weight_skips_salt_per_100g(self, weight) -> None:
         product = {**_PRODUCT_BREAKFAST_M, "weight": weight}
-        filler_products, filler_results = _filler_dishes(mt_id=1, size="M", count=2, id_start=961)
+        if weight == "missing":
+            del product["weight"]
+        menu = self._normalize_with_breakfast(product, id_start=961)
+
+        variants = menu.to_compact_dict()["days"][0]["meals"][0]["variants"]
+        nutrition = next(v for v in variants if v["name"] == "Owsianka")["nutrition"]
+        assert nutrition["salt_g"] == 0.1
+        assert "salt_g_per_100g" not in nutrition
+
+    @pytest.mark.parametrize("weight", ["250", True])
+    def test_non_numeric_weight_raises(self, weight) -> None:
+        product = {**_PRODUCT_BREAKFAST_M, "weight": weight}
+
+        with pytest.raises(ValueError, match="expected numeric 'weight'"):
+            self._normalize_with_breakfast(product, id_start=971)
+
+    @staticmethod
+    def _normalize_with_breakfast(product: dict, *, id_start: int):
+        filler_products, filler_results = _filler_dishes(
+            mt_id=1, size="M", count=2, id_start=id_start
+        )
         includes = {
             "diet_variant_meal_types": [_MEAL_TYPE_BREAKFAST],
             "simple_products": [product, *filler_products],
@@ -533,17 +555,15 @@ class TestNormalizeVariants:
             },
             *filler_results,
         ]
-
-        with pytest.raises(ValueError, match="no valid weight"):
-            normalize_ntfy_week(
-                raw_days=[_make_raw_day(results=results, includes=includes)],
-                provider_id="ntfy",
-                week_start=_WEEK_START,
-                week_end=_WEEK_END,
-                user_id="example",
-                purchased_meals=[PurchasedMeal(type="breakfast", size="M")],
-                expected_variants_per_meal=_expected_variants_per_meal,
-            )
+        return normalize_ntfy_week(
+            raw_days=[_make_raw_day(results=results, includes=includes)],
+            provider_id="ntfy",
+            week_start=_WEEK_START,
+            week_end=_WEEK_END,
+            user_id="example",
+            purchased_meals=[PurchasedMeal(type="breakfast", size="M")],
+            expected_variants_per_meal=_expected_variants_per_meal,
+        )
 
 
 class TestNormalizeDayFiltering:
