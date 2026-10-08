@@ -104,9 +104,30 @@ Each field keeps one meaning regardless of config:
 
 It currently sends per-portion `nutrition`. Without a size that is not the
 user's portion. Option: send `nutrition` only when a size is configured and
-add `nutrition_per_100g` always. That's additive, so `SCHEMA_VERSION` can
-stay 1, but mo-web needs to read the new field to show anything for size-less
-meals. Coordinate with the mo-web side.
+add `nutrition_per_100g` always.
+
+What mo-web (`malpiszon/meal-orchestrator-web`) does today, checked at
+`7b69f24`:
+
+- `src/lib/mo-delivery.ts` validates with zod 4. The top level is a
+  `strictObject`, so unknown top-level keys are rejected (HTTP 400). Nested
+  objects (variants, `nutrition`) use plain `z.object`, so unknown keys there
+  are accepted but stripped: they don't reach `plan_meal_options`, only the
+  stored raw payload (`p_raw`).
+- The contract
+  (`context/archive/2026-09-30-mo-weekly-delivery/mo-delivery-contract.md`)
+  says extending the payload means bumping `schema_version` in coordination
+  with mo-web. `schema_version` is `z.literal(1)`, so a bump must land on
+  mo-web first.
+- mo-web doesn't display nutrition anywhere yet: the dashboard editor only
+  shows name, score and justifications. Nutrition summaries (FR-014/015,
+  "e.g. salt") are parked in its roadmap. Those weekly totals need
+  per-portion values, so dropping `nutrition` for size-less meals means
+  those meals can't count towards them.
+
+So the change here is a coordinated `schema_version` 2 (or keep 1 and accept
+that the new keys stay only in the raw payload until mo-web reads them).
+Decide together with the mo-web side.
 
 ### Example provider (`providers/example_provider.py`)
 
