@@ -110,6 +110,7 @@ def _normalize_variant(raw_variant: dict[str, Any]) -> MealVariant:
     nutrition = raw_variant.get("nutrition") or {}
     if not isinstance(nutrition, dict):
         raise ValueError("example provider variant nutrition must be a mapping")
+    weight_g = raw_variant.get("weight_g")
 
     return MealVariant(
         name=_required(raw_variant, "name"),
@@ -118,6 +119,7 @@ def _normalize_variant(raw_variant: dict[str, Any]) -> MealVariant:
         nutrition=Nutrition(
             **{field: nutrition[field] for field in NUTRITION_FIELDS if field in nutrition}
         ),
+        weight_g=float(weight_g) if weight_g is not None else None,
     )
 
 
@@ -153,6 +155,7 @@ def _placeholder_day(day: date) -> dict:
                             "id": "1",
                             "name": "Tortilla",
                             "composition": "Chicken, vegetables, tortilla, yogurt sauce",
+                            "weight_g": 300,
                             "nutrition": {
                                 "protein_g": 28,
                                 "fat_g": 18,
@@ -174,6 +177,7 @@ def _placeholder_day(day: date) -> dict:
                             "id": "2",
                             "name": "Rice bowl",
                             "composition": "Rice, turkey, broccoli, sesame sauce",
+                            "weight_g": 450,
                             "nutrition": {
                                 "protein_g": 42,
                                 "fat_g": 20,

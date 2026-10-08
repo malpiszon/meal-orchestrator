@@ -23,6 +23,9 @@
                 "sugar_g": 1.3,
                 "fiber_g": 1.1,
                 "salt_g": 2.0
+              },
+              "nutrition_per_100g": {
+                "salt_g": 1.0
               }
             },
             {
@@ -36,6 +39,9 @@
                 "sugar_g": 21.0,
                 "fiber_g": 6.7,
                 "salt_g": 0.2
+              },
+              "nutrition_per_100g": {
+                "salt_g": 0.06
               }
             },
             {
@@ -49,6 +55,9 @@
                 "sugar_g": 1.8,
                 "fiber_g": 4.0,
                 "salt_g": 2.4
+              },
+              "nutrition_per_100g": {
+                "salt_g": 1.39
               }
             }
           ]
@@ -67,6 +76,9 @@
                 "sugar_g": 9.2,
                 "fiber_g": 7.6,
                 "salt_g": 2.6
+              },
+              "nutrition_per_100g": {
+                "salt_g": 0.42
               }
             },
             {
@@ -80,6 +92,9 @@
                 "sugar_g": 12.4,
                 "fiber_g": 4.3,
                 "salt_g": 4.3
+              },
+              "nutrition_per_100g": {
+                "salt_g": 1.0
               }
             },
             {
@@ -93,6 +108,9 @@
                 "sugar_g": 11.3,
                 "fiber_g": 20.5,
                 "salt_g": 6.5
+              },
+              "nutrition_per_100g": {
+                "salt_g": 1.14
               }
             }
           ]
@@ -116,6 +134,9 @@
                 "sugar_g": 6.0,
                 "fiber_g": 1.9,
                 "salt_g": 2.0
+              },
+              "nutrition_per_100g": {
+                "salt_g": 0.78
               }
             },
             {
@@ -129,6 +150,9 @@
                 "sugar_g": 12.3,
                 "fiber_g": 4.8,
                 "salt_g": 0.7
+              },
+              "nutrition_per_100g": {
+                "salt_g": 0.38
               }
             },
             {
@@ -142,6 +166,9 @@
                 "sugar_g": 9.6,
                 "fiber_g": 6.5,
                 "salt_g": 0.4
+              },
+              "nutrition_per_100g": {
+                "salt_g": 0.14
               }
             }
           ]
@@ -160,6 +187,9 @@
                 "sugar_g": 4.6,
                 "fiber_g": 3.2,
                 "salt_g": 0.7
+              },
+              "nutrition_per_100g": {
+                "salt_g": 0.15
               }
             },
             {
@@ -173,6 +203,9 @@
                 "sugar_g": 6.7,
                 "fiber_g": 10.7,
                 "salt_g": 3.4
+              },
+              "nutrition_per_100g": {
+                "salt_g": 0.56
               }
             },
             {
@@ -186,6 +219,9 @@
                 "sugar_g": 22.2,
                 "fiber_g": 11.3,
                 "salt_g": 3.0
+              },
+              "nutrition_per_100g": {
+                "salt_g": 0.54
               }
             }
           ]
@@ -209,6 +245,9 @@
                 "sugar_g": 7.8,
                 "fiber_g": 4.1,
                 "salt_g": 1.6
+              },
+              "nutrition_per_100g": {
+                "salt_g": 0.48
               }
             },
             {
@@ -222,6 +261,9 @@
                 "sugar_g": 6.2,
                 "fiber_g": 3.6,
                 "salt_g": 3.0
+              },
+              "nutrition_per_100g": {
+                "salt_g": 1.55
               }
             },
             {
@@ -235,6 +277,9 @@
                 "sugar_g": 15.7,
                 "fiber_g": 4.4,
                 "salt_g": 0.3
+              },
+              "nutrition_per_100g": {
+                "salt_g": 0.11
               }
             }
           ]
@@ -253,6 +298,9 @@
                 "sugar_g": 7.1,
                 "fiber_g": 3.4,
                 "salt_g": 2.9
+              },
+              "nutrition_per_100g": {
+                "salt_g": 0.48
               }
             },
             {
@@ -266,6 +314,9 @@
                 "sugar_g": 11.1,
                 "fiber_g": 14.6,
                 "salt_g": 1.1
+              },
+              "nutrition_per_100g": {
+                "salt_g": 0.18
               }
             },
             {
@@ -279,6 +330,9 @@
                 "sugar_g": 10.3,
                 "fiber_g": 5.9,
                 "salt_g": 3.3
+              },
+              "nutrition_per_100g": {
+                "salt_g": 0.76
               }
             }
           ]
@@ -302,6 +356,9 @@
                 "sugar_g": 2.1,
                 "fiber_g": 1.4,
                 "salt_g": 1.4
+              },
+              "nutrition_per_100g": {
+                "salt_g": 0.6
               }
             },
             {
@@ -315,6 +372,9 @@
                 "sugar_g": 9.4,
                 "fiber_g": 3.7,
                 "salt_g": 0.9
+              },
+              "nutrition_per_100g": {
+                "salt_g": 0.41
               }
             },
             {
@@ -328,6 +388,9 @@
                 "sugar_g": 7.0,
                 "fiber_g": 7.7,
                 "salt_g": 2.6
+              },
+              "nutrition_per_100g": {
+                "salt_g": 0.95
               }
             }
           ]
@@ -346,6 +409,9 @@
                 "sugar_g": 4.6,
                 "fiber_g": 6.2,
                 "salt_g": 2.7
+              },
+              "nutrition_per_100g": {
+                "salt_g": 0.52
               }
             },
             {
@@ -359,6 +425,9 @@
                 "sugar_g": 11.3,
                 "fiber_g": 6.0,
                 "salt_g": 4.0
+              },
+              "nutrition_per_100g": {
+                "salt_g": 0.78
               }
             },
             {
@@ -372,6 +441,9 @@
                 "sugar_g": 14.9,
                 "fiber_g": 9.2,
                 "salt_g": 6.2
+              },
+              "nutrition_per_100g": {
+                "salt_g": 1.19
               }
             }
           ]
@@ -395,6 +467,9 @@
                 "sugar_g": 8.5,
                 "fiber_g": 2.4,
                 "salt_g": 0.6
+              },
+              "nutrition_per_100g": {
+                "salt_g": 0.3
               }
             },
             {
@@ -408,6 +483,9 @@
                 "sugar_g": 2.3,
                 "fiber_g": 3.1,
                 "salt_g": 1.5
+              },
+              "nutrition_per_100g": {
+                "salt_g": 0.86
               }
             },
             {
@@ -421,6 +499,9 @@
                 "sugar_g": 23.7,
                 "fiber_g": 4.8,
                 "salt_g": 0.2
+              },
+              "nutrition_per_100g": {
+                "salt_g": 0.08
               }
             }
           ]
@@ -439,6 +520,9 @@
                 "sugar_g": 16.5,
                 "fiber_g": 5.9,
                 "salt_g": 1.0
+              },
+              "nutrition_per_100g": {
+                "salt_g": 0.19
               }
             },
             {
@@ -452,6 +536,9 @@
                 "sugar_g": 12.5,
                 "fiber_g": 6.3,
                 "salt_g": 2.2
+              },
+              "nutrition_per_100g": {
+                "salt_g": 0.43
               }
             },
             {
@@ -465,6 +552,9 @@
                 "sugar_g": 19.3,
                 "fiber_g": 7.8,
                 "salt_g": 9.3
+              },
+              "nutrition_per_100g": {
+                "salt_g": 1.91
               }
             }
           ]
