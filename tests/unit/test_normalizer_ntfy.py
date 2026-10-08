@@ -435,7 +435,8 @@ class TestNormalizeVariants:
         )
 
         variants = menu.to_compact_dict()["days"][0]["meals"][0]["variants"]
-        nutrition = next(v for v in variants if v["name"] == "Owsianka")["nutrition"]
+        variant = next(v for v in variants if v["name"] == "Owsianka")
+        nutrition = variant["nutrition"]
         assert nutrition["protein_g"] == 10.0
         assert nutrition["fat_g"] == 5.0
         assert nutrition["saturated_fat_g"] == 1.5
@@ -443,7 +444,8 @@ class TestNormalizeVariants:
         assert nutrition["sugar_g"] == 8.0
         assert nutrition["fiber_g"] == 3.0
         assert nutrition["salt_g"] == 0.1
-        assert nutrition["salt_g_per_100g"] == 0.04
+        assert "salt_g_per_100g" not in nutrition
+        assert variant["nutrition_per_100g"] == {"salt_g": 0.04}
 
     def test_composition_whitespace_normalized(self) -> None:
         product = {**_PRODUCT_BREAKFAST_M, "composition": "  płatki  owsiane,\tmleko  "}
@@ -511,10 +513,10 @@ class TestNormalizeVariants:
         )
 
         variants = menu.to_compact_dict()["days"][0]["meals"][0]["variants"]
-        nutrition = next(v for v in variants if v["name"] == "Owsianka")["nutrition"]
-        assert "protein_g" in nutrition
-        assert "fat_g" not in nutrition
-        assert "salt_g_per_100g" not in nutrition
+        variant = next(v for v in variants if v["name"] == "Owsianka")
+        assert "protein_g" in variant["nutrition"]
+        assert "fat_g" not in variant["nutrition"]
+        assert "nutrition_per_100g" not in variant
 
     @pytest.mark.parametrize(
         "weight", ["missing", None, 0, -250, float("nan"), float("inf")]
@@ -526,9 +528,9 @@ class TestNormalizeVariants:
         menu = self._normalize_with_breakfast(product, id_start=961)
 
         variants = menu.to_compact_dict()["days"][0]["meals"][0]["variants"]
-        nutrition = next(v for v in variants if v["name"] == "Owsianka")["nutrition"]
-        assert nutrition["salt_g"] == 0.1
-        assert "salt_g_per_100g" not in nutrition
+        variant = next(v for v in variants if v["name"] == "Owsianka")
+        assert variant["nutrition"]["salt_g"] == 0.1
+        assert "nutrition_per_100g" not in variant
 
     @pytest.mark.parametrize("weight", ["250", True])
     def test_non_numeric_weight_raises(self, weight) -> None:

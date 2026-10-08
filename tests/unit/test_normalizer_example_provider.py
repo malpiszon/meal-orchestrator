@@ -63,7 +63,7 @@ def test_normalizer_maps_dish_id_shared_across_sizes() -> None:
     assert variant_for("XL").provider_meal_id == "101"
 
 
-def _breakfast_m_nutrition(weight_g) -> dict:
+def _breakfast_m_variant(weight_g) -> dict:
     raw_menu = json.loads(Path("tests/fixtures/provider_menu_raw.json").read_text())
     raw_menu["days"][0]["meals"][0]["sizes"]["M"][0]["weight_g"] = weight_g
 
@@ -75,15 +75,15 @@ def _breakfast_m_nutrition(weight_g) -> dict:
         user_id="example",
         purchased_meals=[PurchasedMeal(type="breakfast", size="M")],
     )
-    return menu.to_compact_dict()["days"][0]["meals"][0]["variants"][0]["nutrition"]
+    return menu.to_compact_dict()["days"][0]["meals"][0]["variants"][0]
 
 
 def test_normalizer_derives_salt_per_100g_from_weight() -> None:
-    assert _breakfast_m_nutrition(300)["salt_g_per_100g"] == 0.7
+    assert _breakfast_m_variant(300)["nutrition_per_100g"] == {"salt_g": 0.7}
 
 
 @pytest.mark.parametrize("weight_g", [None, 0, -300])
 def test_normalizer_skips_salt_per_100g_without_usable_weight(weight_g) -> None:
-    nutrition = _breakfast_m_nutrition(weight_g)
-    assert nutrition["salt_g"] == 2.1
-    assert "salt_g_per_100g" not in nutrition
+    variant = _breakfast_m_variant(weight_g)
+    assert variant["nutrition"]["salt_g"] == 2.1
+    assert "nutrition_per_100g" not in variant
