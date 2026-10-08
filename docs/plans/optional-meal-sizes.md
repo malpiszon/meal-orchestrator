@@ -2,9 +2,9 @@
 
 Status: not started. Depends on the `salt-per-100g` branch landing first. It
 adds `MealVariant.weight_g` and sends only salt per 100 g
-(`nutrition.salt_g_per_100g`) to the LLM; the other nutrients stay
+(`nutrition_per_100g.salt_g`) to the LLM; the other nutrients stay
 per-portion only. Without a configured size this plan needs per-100 g values
-for every nutrient, so it extends that to a full per-100 g block.
+for every nutrient, so it adds the rest to that same block.
 
 ## Goal
 
@@ -90,7 +90,7 @@ purchased_meals:
 Each field keeps one meaning regardless of config:
 
 - `nutrition_per_100g`: always present, all nutrients (extends the
-  salt-only `salt_g_per_100g` from step 1, which then moves into this block). The LLM scores on it,
+  salt-only block from step 1). The LLM scores on it,
   so scores stay comparable across users and sizes.
 - `nutrition` (per portion) and `weight_g`: only sent when the meal has a
   size configured. Without a size the reference-size totals would be
