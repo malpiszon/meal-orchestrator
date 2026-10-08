@@ -188,7 +188,7 @@ def _to_meal_variant(product: dict[str, Any], provider_meal_id: str) -> MealVari
         name=name,
         composition=composition,
         provider_meal_id=provider_meal_id,
-        weight_g=_float_or_none(product, "weight"),
+        weight_g=_weight_or_none(product),
         nutrition=Nutrition(
             protein_g=_float_or_none(product, "protein"),
             fat_g=_float_or_none(product, "fat"),
@@ -201,13 +201,22 @@ def _to_meal_variant(product: dict[str, Any], provider_meal_id: str) -> MealVari
     )
 
 
+def _weight_or_none(product: dict[str, Any]) -> float | None:
+    # Weight only feeds the optional salt-per-100 g value, so an unusable one
+    # just leaves that out rather than failing the week.
+    weight = product.get("weight")
+    if isinstance(weight, bool) or not isinstance(weight, (int, float)):
+        return None
+    return float(weight)
+
+
 def _float_or_none(product: dict[str, Any], key: str) -> float | None:
     value = product.get(key)
     if value is None:
         return None
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if not isinstance(value, (int, float)):
         raise ValueError(
-            f"ntfy: expected numeric {key!r} value, got "
+            f"ntfy: expected numeric nutrition value, got "
             f"{type(value).__name__}: {value!r}"
         )
     return float(value)

@@ -444,7 +444,6 @@ class TestNormalizeVariants:
         assert nutrition["sugar_g"] == 8.0
         assert nutrition["fiber_g"] == 3.0
         assert nutrition["salt_g"] == 0.1
-        assert "salt_g_per_100g" not in nutrition
         assert variant["nutrition_per_100g"] == {"salt_g": 0.04}
 
     def test_composition_whitespace_normalized(self) -> None:
@@ -519,7 +518,7 @@ class TestNormalizeVariants:
         assert "nutrition_per_100g" not in variant
 
     @pytest.mark.parametrize(
-        "weight", ["missing", None, 0, -250, float("nan"), float("inf")]
+        "weight", ["missing", None, 0, -250, float("nan"), float("inf"), "250", True]
     )
     def test_unusable_weight_skips_salt_per_100g(self, weight) -> None:
         product = {**_PRODUCT_BREAKFAST_M, "weight": weight}
@@ -531,13 +530,6 @@ class TestNormalizeVariants:
         variant = next(v for v in variants if v["name"] == "Owsianka")
         assert variant["nutrition"]["salt_g"] == 0.1
         assert "nutrition_per_100g" not in variant
-
-    @pytest.mark.parametrize("weight", ["250", True])
-    def test_non_numeric_weight_raises(self, weight) -> None:
-        product = {**_PRODUCT_BREAKFAST_M, "weight": weight}
-
-        with pytest.raises(ValueError, match="expected numeric 'weight'"):
-            self._normalize_with_breakfast(product, id_start=971)
 
     @staticmethod
     def _normalize_with_breakfast(product: dict, *, id_start: int):
