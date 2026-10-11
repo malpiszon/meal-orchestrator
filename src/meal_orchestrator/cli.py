@@ -45,14 +45,15 @@ def main(argv: list[str] | None = None) -> int:
         monitor_slug=MONITOR_SLUG,
         status=MonitorStatus.IN_PROGRESS,
     )
-    app_config = load_app_config(args.config)
-    users = load_users_config(args.users)
-    orchestrator = RunOrchestrator(
-        app_config=app_config,
-        users=users,
-        project_root=Path.cwd(),
-    )
+    status = MonitorStatus.ERROR
     try:
+        app_config = load_app_config(args.config)
+        users = load_users_config(args.users)
+        orchestrator = RunOrchestrator(
+            app_config=app_config,
+            users=users,
+            project_root=Path.cwd(),
+        )
         results = orchestrator.run(
             RunOptions(
                 user_id=args.user_id,
@@ -63,18 +64,12 @@ def main(argv: list[str] | None = None) -> int:
                 max_concurrent_users=args.max_concurrent_users,
             )
         )
-    except Exception:
-        capture_checkin(
-            monitor_slug=MONITOR_SLUG, check_in_id=check_in_id, status=MonitorStatus.ERROR
-        )
-        raise
-    failed = any(result.status == WorkflowStatus.FAILED for result in results)
-    capture_checkin(
-        monitor_slug=MONITOR_SLUG,
-        check_in_id=check_in_id,
-        status=MonitorStatus.ERROR if failed else MonitorStatus.OK,
-    )
-    return 1 if failed else 0
+        failed = any(result.status == WorkflowStatus.FAILED for result in results)
+        if not failed:
+            status = MonitorStatus.OK
+        return 1 if failed else 0
+    finally:
+        capture_checkin(monitor_slug=MONITOR_SLUG, check_in_id=check_in_id, status=status)
 
 
 if __name__ == "__main__":
