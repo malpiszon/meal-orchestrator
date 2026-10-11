@@ -6,10 +6,16 @@ import sys
 from datetime import date
 from pathlib import Path
 
+import sentry_sdk
+from sentry_sdk.crons import capture_checkin
+from sentry_sdk.crons.consts import MonitorStatus
+
 from meal_orchestrator.config import load_app_config, load_users_config
 from meal_orchestrator.domain import WorkflowStatus
 from meal_orchestrator.observability import configure_logging
 from meal_orchestrator.orchestrator import RunOptions, RunOrchestrator
+
+MONITOR_SLUG = "mo-weekly-run"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -34,6 +40,11 @@ def main(argv: list[str] | None = None) -> int:
         print("error: OPENROUTER_API_KEY environment variable is required", file=sys.stderr)
         return 2
     configure_logging(args.log_level)
+    sentry_sdk.init(dsn=os.environ.get("SENTRY_DSN"))
+    check_in_id = capture_checkin(
+        monitor_slug=MONITOR_SLUG,
+        status=MonitorStatus.IN_PROGRESS,
+    )
     app_config = load_app_config(args.config)
     users = load_users_config(args.users)
     orchestrator = RunOrchestrator(
@@ -41,17 +52,29 @@ def main(argv: list[str] | None = None) -> int:
         users=users,
         project_root=Path.cwd(),
     )
-    results = orchestrator.run(
-        RunOptions(
-            user_id=args.user_id,
-            provider_override=args.provider_override,
-            week_start=args.week_start,
-            dry_run=args.dry_run,
-            llm_model=args.llm_model,
-            max_concurrent_users=args.max_concurrent_users,
+    try:
+        results = orchestrator.run(
+            RunOptions(
+                user_id=args.user_id,
+                provider_override=args.provider_override,
+                week_start=args.week_start,
+                dry_run=args.dry_run,
+                llm_model=args.llm_model,
+                max_concurrent_users=args.max_concurrent_users,
+            )
         )
+    except Exception:
+        capture_checkin(
+            monitor_slug=MONITOR_SLUG, check_in_id=check_in_id, status=MonitorStatus.ERROR
+        )
+        raise
+    failed = any(result.status == WorkflowStatus.FAILED for result in results)
+    capture_checkin(
+        monitor_slug=MONITOR_SLUG,
+        check_in_id=check_in_id,
+        status=MonitorStatus.ERROR if failed else MonitorStatus.OK,
     )
-    return 1 if any(result.status == WorkflowStatus.FAILED for result in results) else 0
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
