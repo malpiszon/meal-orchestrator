@@ -41,14 +41,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     configure_logging(args.log_level)
     sentry_sdk.init(dsn=os.environ.get("SENTRY_DSN"))
-    # Only full, real runs count as the weekly run; manual reruns must not mask a missed one.
-    is_weekly_run = not args.dry_run and args.user_id is None
-    check_in_id = None
-    if is_weekly_run:
-        check_in_id = capture_checkin(
-            monitor_slug=MONITOR_SLUG,
-            status=MonitorStatus.IN_PROGRESS,
-        )
+    check_in_id = capture_checkin(
+        monitor_slug=MONITOR_SLUG,
+        status=MonitorStatus.IN_PROGRESS,
+    )
     status = MonitorStatus.ERROR
     try:
         app_config = load_app_config(args.config)
@@ -73,8 +69,7 @@ def main(argv: list[str] | None = None) -> int:
             status = MonitorStatus.OK
         return 1 if failed else 0
     finally:
-        if is_weekly_run:
-            capture_checkin(monitor_slug=MONITOR_SLUG, check_in_id=check_in_id, status=status)
+        capture_checkin(monitor_slug=MONITOR_SLUG, check_in_id=check_in_id, status=status)
 
 
 if __name__ == "__main__":
