@@ -147,6 +147,8 @@ Secrets are read from environment variables, never from YAML:
   skipped when absent.
 - `delivery.mo_web.token_env` (e.g. `MO_WEB_TOKEN`) — optional; mo-web
   delivery is skipped with a warning when absent.
+- `SENTRY_DSN` — optional; enables Sentry error reporting and a cron check-in
+  (`mo-weekly-run`, see `cli.py`) per run.
 - Each user's `discord_webhook_env` (referenced by name from
   `users.yaml`) — optional; that user's Discord notification is skipped when
   absent.
