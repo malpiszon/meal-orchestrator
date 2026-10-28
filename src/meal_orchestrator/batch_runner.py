@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import http.client
 import json
 import logging
 import os
 import time
-import urllib.error
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -220,7 +220,9 @@ def poll_until_terminal(
     while True:
         try:
             data = get_batch(batch_id)
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        # OSError covers URLError/HTTPError and timeouts, plus connection resets
+        # raised while reading the response, which urllib doesn't wrap.
+        except (OSError, http.client.HTTPException, json.JSONDecodeError) as exc:
             logger.warning(
                 "batch status check failed for batch_id=%s (will retry): %s",
                 batch_id,
