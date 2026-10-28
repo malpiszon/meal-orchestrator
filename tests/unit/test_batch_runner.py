@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import http.client
+
+import pytest
+
 from meal_orchestrator.batch_runner import (
     PendingBatchState,
     PendingBatchUser,
@@ -259,6 +263,38 @@ def test_poll_until_terminal_survives_a_transient_error_and_keeps_polling() -> N
 
     assert result == {"status": "completed"}
     assert calls["n"] == 4
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        http.client.RemoteDisconnected("Remote end closed connection without response"),
+        http.client.IncompleteRead(b"partial"),
+        ConnectionResetError("connection reset by peer"),
+    ],
+)
+def test_poll_until_terminal_survives_connection_errors_urllib_does_not_wrap(error) -> None:
+    """Connection drops while reading the response reach the caller unwrapped
+    (not as URLError) and must still count as an inconclusive check."""
+    config = BatchConfig(initial_poll_interval_seconds=1, max_poll_interval_seconds=10)
+    calls = {"n": 0}
+
+    def flaky_get_batch(batch_id):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise error
+        return {"status": "completed"}
+
+    result = poll_until_terminal(
+        "batch-1",
+        config,
+        get_batch=flaky_get_batch,
+        is_pending=lambda data: data["status"] != "completed",
+        sleep=lambda _: None,
+    )
+
+    assert result == {"status": "completed"}
+    assert calls["n"] == 2
 
 
 def test_poll_until_terminal_eventually_times_out_if_every_check_errors() -> None:
